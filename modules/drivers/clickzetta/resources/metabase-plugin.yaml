@@ -1,0 +1,47 @@
+info:
+  name: Metabase Clickzetta Driver
+  version: 1.0.0-SNAPSHOT-0.0.1
+  description: Allows Metabase to connect to Clickzetta databases.
+driver:
+  name: clickzetta
+  display-name: Clickzetta
+  lazy-load: true
+  parent: sql-jdbc
+  connection-properties:
+    - name: instance
+      display-name: Instance
+      type: string
+      required: true
+      placeholder: "myinstance"
+      description: "The instance name of your Clickzetta database."
+    - name: service
+      display-name: Service
+      type: string
+      required: true
+      placeholder: "myservice"
+      description: "The service name of your Clickzetta database."
+    - user
+    - password
+    - name: workspace
+      display-name: Workspace
+      type: string
+      required: true
+      placeholder: "myworkspace"
+      description: "The workspace name of your Clickzetta database."
+    - name: virtualCluster
+      display-name: Virtual Cluster
+      type: string
+      required: true
+      placeholder: "myvirtualcluster"
+      description: "The virtual cluster name of your Clickzetta database."
+    - name: schema
+      display-name: Schema
+      type: string
+      required: true
+      placeholder: "myschema"
+      description: "The schema name of your Clickzetta database."
+init:
+  - step: load-namespace
+    namespace: metabase.driver.clickzetta
+  - step: register-jdbc-driver
+    class: com.clickzetta.client.jdbc.ClickZettaDriver
