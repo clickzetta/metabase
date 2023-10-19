@@ -19,4 +19,5 @@
   metabase/sparksql           {:local/root "sparksql"}
   metabase/sqlite             {:local/root "sqlite"}
   metabase/sqlserver          {:local/root "sqlserver"}
+  metabase/clickzetta         {:local/root "clickzetta"}
   metabase/vertica            {:local/root "vertica"}}}

@@ -1,6 +1,8 @@
 (ns metabase.driver.sql-jdbc.common
   (:require
    [clojure.string :as str]
+    [metabase.util.i18n :refer [trs tru]]
+       [metabase.util.log :as log]
    [metabase.util :as u]))
 
 (def ^:private valid-separator-styles #{:url :comma :semicolon})
@@ -14,6 +16,7 @@
   documentation for `handle-additional-options` for further details."
   {:added "0.41.0", :arglists '([connection-string separator-style additional-opts])}
   [connection-string separator-style additional-opts]
+  (log/info (trs "metabase.driver.sql-jdbc.common {0}" (str " connection-string: " connection-string " separator-style: " separator-style " additional-opts: " additional-opts)))
   {:pre [(string? connection-string)
          (or (nil? additional-opts) (string? additional-opts))
          (contains? valid-separator-styles separator-style)]}
@@ -24,7 +27,8 @@
                                   :url       (if (str/includes? connection-string "?")
                                                "&"
                                                "?"))
-                                additional-opts))))
+                                additional-opts)))
+  )
 
 (defn additional-opts->string
   "Turns a map of `additional-opts` into a single string, based on the `separator-style`."

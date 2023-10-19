@@ -38,7 +38,7 @@ driver:
       display-name: Schema
       type: string
       required: true
-      placeholder: "myschema"
+      placeholder: "public"
       description: "The schema name of your Clickzetta database."
 init:
   - step: load-namespace

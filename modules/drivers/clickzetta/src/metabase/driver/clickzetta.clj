@@ -11,6 +11,7 @@
    [metabase.driver.sql :as driver.sql]
    [metabase.driver.sql-jdbc :as sql-jdbc]
    [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
+    [metabase.mbql.util :as mbql.u]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
    [metabase.driver.sql-jdbc.execute.legacy-impl :as sql-jdbc.legacy]
@@ -18,6 +19,7 @@
    [metabase.driver.sql-jdbc.sync.common :as sql-jdbc.sync.common]
    [metabase.driver.sql-jdbc.sync.describe-table
     :as sql-jdbc.describe-table]
+    [metabase.db.spec :as db.spec]
    [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.driver.sql.util :as sql.u]
    [metabase.driver.sql.util.unprepare :as unprepare]
@@ -64,17 +66,6 @@
   [_]
   :sunday)
 
-(defmethod sql-jdbc.conn/connection-details->spec :clickzetta
-  [_ {:keys [instance service workspace], :as details}]
-  (let [upcase-not-nil (fn [s] (when s (u/upper-case-en s)))]
-    (-> (merge {:classname                                  "com.clickzetta.client.jdbc.ClickZettaDriver"
-                :subprotocol                                "clickzetta"
-                :subname                                    (str "//" instance "." service "/" workspace)}
-
-               (-> details
-                   (dissoc :user :password :virtualCluster :schema )))
-        (sql-jdbc.common/handle-additional-options details))))
-
 (defmethod sql-jdbc.sync/database-type->base-type :clickzetta
   [_ base-type]
   ({
@@ -94,6 +85,73 @@
     :MAP                        :type/*
     :STRUCT                     :type/*
     :ARRAY                      :type/*} base-type))
+
+(defmethod driver/describe-database :clickzetta
+  [driver database]
+  {:tables
+   (sql-jdbc.execute/do-with-connection-with-options
+    driver
+    database
+    nil
+    (fn [^Connection conn]
+      (set
+       (for [{schema :schema_name, table-name :table_name} (jdbc/query {:connection conn} ["show tables"])]
+         {:name   table-name
+          :schema schema}))))})
+
+
+(defn- valid-describe-table-row? [{:keys [column_name data_type]}]
+  (every? (every-pred (complement str/blank?)
+                      (complement #(str/starts-with? % "#")))
+          [column_name data_type]))
+
+(defn- dash-to-underscore [s]
+  (when s
+    (str/replace s #"\"" "`")))
+
+(defmethod driver/describe-table :clickzetta
+  [driver database {table-name :name, schema :schema}]
+  {:name   table-name
+   :schema schema
+   :fields
+   (sql-jdbc.execute/do-with-connection-with-options
+    driver
+    database
+    nil
+    (fn [^Connection conn]
+      (let [results (jdbc/query {:connection conn} [(format
+                                                     "describe %s.%s"
+                                                                       (dash-to-underscore schema)
+                                                                       (dash-to-underscore table-name))])]
+        (set
+         (for [[idx {col-name :column_name, data-type :data_type, :as result}] (m/indexed results)
+               :when (valid-describe-table-row? result)]
+           {:name              col-name
+            :database-type     (u/upper-case-en(first(str/split (first(str/split data-type #" ")) #"\(")))
+            :base-type         (sql-jdbc.sync/database-type->base-type :clickzetta (keyword (u/upper-case-en(first(str/split (first(str/split data-type #" ")) #"\(")))))
+            :database-position idx})))))})
+
+(defmethod db.spec/spec :clickzetta
+  [_ {:keys [instance service workspace]
+      :as   opts}]
+  (merge
+   {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
+    :subprotocol                   "clickzetta"
+    :subname                       (str "//" instance "." service "/" workspace "/")
+    }
+   (dissoc opts :instance :service :workspace :port)))
+
+
+(defmethod sql-jdbc.conn/connection-details->spec :clickzetta
+  [_ {:keys [user password virtualCluster schema instance service workspace]}]
+
+    (sql-jdbc.common/handle-additional-options {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
+                                                   :subprotocol                   "clickzetta"
+                                                   :subname                       (str "//" instance "." service "/" workspace)
+                                                   }
+                                               {:additional-options (str "user=" user "&password=" password "&virtualCluster=" virtualCluster "&schema=" schema)}))
+
+
 
 (defmethod sql.qp/honey-sql-version :clickzetta
   [_driver]
@@ -136,3 +194,20 @@
 (defmethod sql.qp/date [:clickzetta :day-of-week]
   [_driver _unit expr]
   (:weekday expr))
+
+(defmethod sql.qp/quote-style :clickzetta
+  [_driver]
+  :mysql)
+
+(defmethod driver/execute-reducible-query :clickzetta
+  [driver {{sql :query, :keys [params], :as inner-query} :native, :as outer-query} context respond]
+  (let [database (lib.metadata/database (qp.store/metadata-provider))]
+    (def schema_select (str "`" (get-in database [:details :schema] "public") "`."))
+     (def replace_sql (str/replace sql schema_select ""))
+      (log/info "Executing Clickzetta query" replace_sql)
+    (let [inner-query (-> (assoc inner-query
+                                   :query  replace_sql
+                                   :max-rows (mbql.u/query->max-rows-limit outer-query))
+                            (dissoc :params))
+            query       (assoc outer-query :native inner-query)]
+        ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond))))
