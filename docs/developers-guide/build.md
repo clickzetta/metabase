@@ -97,6 +97,7 @@ The “official” branch of Metabase is called `master`, and other feature deve
    ```
    cd ~/workspace/metabase
    ```
+   
 
 6. "Pull” down the latest code by running:
 

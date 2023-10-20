@@ -1,5 +1,5 @@
 (ns metabase.driver.clickzetta
-  "Clickzetta Driver."
+  "ClickZetta Lakehouse Driver."
   (:require
    [clojure.java.jdbc :as jdbc]
    [clojure.set :as set]
@@ -59,7 +59,7 @@
     #"(?s).*Object does not exist.*$"
     :database-name-incorrect
 
-    ; default - the Clickzetta errors have a \n in them
+    ; default - the ClickZetta Lakehouse errors have a \n in them
     message))
 
 (defmethod driver/db-start-of-week :clickzetta
@@ -204,7 +204,7 @@
   (let [database (lib.metadata/database (qp.store/metadata-provider))]
     (def schema_select (str "`" (get-in database [:details :schema] "public") "`."))
      (def replace_sql (str/replace sql schema_select ""))
-      (log/info "Executing Clickzetta query" replace_sql)
+      (log/info "Executing ClickZetta Lakehouse query" replace_sql)
     (let [inner-query (-> (assoc inner-query
                                    :query  replace_sql
                                    :max-rows (mbql.u/query->max-rows-limit outer-query))

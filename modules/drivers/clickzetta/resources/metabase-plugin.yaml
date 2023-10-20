@@ -1,25 +1,25 @@
 info:
-  name: Metabase Clickzetta Driver
+  name: Metabase ClickZetta Lakehouse Driver
   version: 1.0.0-SNAPSHOT-0.0.1
-  description: Allows Metabase to connect to Clickzetta databases.
+  description: Allows Metabase to connect to ClickZetta Lakehouse.
 driver:
   name: clickzetta
-  display-name: Clickzetta
+  display-name: ClickZetta Lakehouse
   lazy-load: true
   parent: sql-jdbc
   connection-properties:
     - name: instance
-      display-name: Instance
+      display-name: InstanceID
       type: string
       required: true
-      placeholder: "myinstance"
-      description: "The instance name of your Clickzetta database."
+      placeholder: "myinstanceid"
+      description: "The instance ID  of your ClickZetta Lakehouse."
     - name: service
       display-name: Service
       type: string
       required: true
-      placeholder: "myservice"
-      description: "The service name of your Clickzetta database."
+      placeholder: "api.clickzetta.com"
+      description: "The service name of your ClickZetta Lakehouse."
     - user
     - password
     - name: workspace
@@ -27,19 +27,19 @@ driver:
       type: string
       required: true
       placeholder: "myworkspace"
-      description: "The workspace name of your Clickzetta database."
+      description: "The workspace name of your ClickZetta Lakehouse."
     - name: virtualCluster
       display-name: Virtual Cluster
       type: string
       required: true
-      placeholder: "myvirtualcluster"
-      description: "The virtual cluster name of your Clickzetta database."
+      placeholder: "default"
+      description: "The virtual cluster name of your ClickZetta Lakehouse."
     - name: schema
       display-name: Schema
       type: string
       required: true
       placeholder: "public"
-      description: "The schema name of your Clickzetta database."
+      description: "The schema name of your ClickZetta Lakehouse."
 init:
   - step: load-namespace
     namespace: metabase.driver.clickzetta
