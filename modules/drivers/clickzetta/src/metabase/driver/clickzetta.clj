@@ -61,6 +61,11 @@
 
     ; default - the ClickZetta Lakehouse errors have a \n in them
     message))
+(defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :clickzetta
+  [driver database]
+  (merge
+   ((get-method sql-jdbc.conn/data-warehouse-connection-pool-properties :sql-jdbc) driver database)
+   {"preferredTestQuery" "SELECT 1"}))
 
 (defmethod driver/db-start-of-week :clickzetta
   [_]
@@ -273,3 +278,15 @@
                             (dissoc :params))
             query       (assoc outer-query :native inner-query)]
         ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond))))
+
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/DATE]
+  [_ ^ResultSet rs _rsmeta ^Integer i]
+  (fn []
+    (when-let [t (.getDate rs i)]
+      (t/zoned-date-time (t/local-date t) (t/local-time 0) (t/zone-id "UTC")))))
+
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP]
+  [_ ^ResultSet rs _rsmeta ^Integer i]
+  (fn []
+    (when-let [t (.getTimestamp rs i)]
+      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
