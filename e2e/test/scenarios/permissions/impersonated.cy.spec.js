@@ -277,7 +277,7 @@ describeEE("impersonated permission", () => {
       // Page leave confirmation should be on top
       modal()
         .as("leaveConfirmation")
-        .findByText("Changes were not saved")
+        .findByText("Discard your changes?")
         .should("be.visible");
 
       // Cancel
@@ -290,7 +290,7 @@ describeEE("impersonated permission", () => {
 
       // Go to settings
       cy.findByRole("dialog").findByText("Edit settings").click();
-      cy.get("@leaveConfirmation").findByText("Leave anyway").click();
+      cy.get("@leaveConfirmation").findByText("Discard changes").click();
 
       cy.focused().should("have.attr", "placeholder", "username");
     });
@@ -329,7 +329,7 @@ describeEE("impersonated permission", () => {
     });
 
     it("have limited access", () => {
-      cy.visit(`/browse/${PG_DB_ID}`);
+      cy.visit(`/browse/databases/${PG_DB_ID}`);
 
       // No access through the visual query builder
       cy.get("main").within(() => {
@@ -340,7 +340,7 @@ describeEE("impersonated permission", () => {
       });
 
       // Has access to allowed tables
-      cy.visit(`/browse/${PG_DB_ID}`);
+      cy.visit(`/browse/databases/${PG_DB_ID}`);
 
       cy.get("main").findByText("Orders").click();
       cy.findAllByTestId("header-cell").contains("Subtotal");

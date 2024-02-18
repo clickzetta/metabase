@@ -20,7 +20,8 @@
    [metabase.models.permissions-group-membership
     :refer [PermissionsGroupMembership]]
    [metabase.models.query.permissions :as query-perms]
-   [metabase.plugins.classloader :as classloader]
+   [metabase.permissions.util :as perms.u]
+   [metabase.public-settings.premium-features :refer [defenterprise]]
    [metabase.query-processor.error-type :as qp.error-type]
    [metabase.query-processor.middleware.fetch-source-query
     :as fetch-source-query]
@@ -134,8 +135,7 @@
                         :type     :query
                         :query    source-query}
           preprocessed (binding [*current-user-id* nil]
-                         (classloader/require 'metabase.query-processor)
-                         ((resolve 'metabase.query-processor/preprocess) query))]
+                         ((requiring-resolve 'metabase.query-processor.preprocess/preprocess) query))]
       (select-keys (:query preprocessed) [:source-query :source-metadata]))
     (catch Throwable e
       (throw (ex-info (tru "Error preprocessing source query when applying GTAP: {0}" (ex-message e))
@@ -155,7 +155,7 @@
 (mu/defn ^:private mbql-query-metadata :- [:+ :map]
   [inner-query]
   (binding [*current-user-id* nil]
-    ((requiring-resolve 'metabase.query-processor/query->expected-cols)
+    ((requiring-resolve 'metabase.query-processor.preprocess/query->expected-cols)
      {:database (u/the-id (lib.metadata/database (qp.store/metadata-provider)))
       :type     :query
       :query    inner-query})))
@@ -256,7 +256,7 @@
    (remove nil?)
    set))
 
-(mu/defn ^:private sandbox->perms-set :- [:set perms/PathSchema]
+(mu/defn ^:private sandbox->perms-set :- [:set perms.u/PathSchema]
   "Calculate the set of permissions needed to run the query associated with a sandbox; this set of permissions is excluded
   during the normal QP perms check.
 
@@ -321,7 +321,7 @@
 
 (defn- expected-cols [query]
   (binding [*current-user-id* nil]
-    ((requiring-resolve 'metabase.query-processor/query->expected-cols) query)))
+    ((requiring-resolve 'metabase.query-processor.preprocess/query->expected-cols) query)))
 
 (defn- gtapped-query
   "Apply GTAPs to `query` and return the updated version of `query`."
@@ -336,9 +336,10 @@
 (def ^:private default-recursion-limit 20)
 (def ^:private ^:dynamic *recursion-limit* default-recursion-limit)
 
-(defn apply-sandboxing
+(defenterprise apply-sandboxing
   "Pre-processing middleware. Replaces source tables a User was querying against with source queries that (presumably)
   restrict the rows returned, based on presence of sandboxes."
+  :feature :sandboxes
   [query]
   (if-not api/*is-superuser?*
     (or (when-let [table-id->gtap (when *current-user-id*
@@ -372,10 +373,13 @@
                  (get col-name->expected-col (:name col))))))]
     (update metadata :cols merge-cols)))
 
-(defn merge-sandboxing-metadata
+(defenterprise merge-sandboxing-metadata
   "Post-processing middleware. Merges in column metadata from the original, unsandboxed version of the query."
-  [{::keys [original-metadata]} rff]
-  (if original-metadata
-    (fn merge-sandboxing-metadata-rff* [metadata]
-      (rff (merge-metadata original-metadata metadata)))
-    rff))
+  :feature :sandboxes
+  [{::keys [original-metadata] :as query} rff]
+  (fn merge-sandboxing-metadata-rff* [metadata]
+    (let [metadata (assoc metadata :is_sandboxed (some? (get-in query [::qp.perms/perms :gtaps])))
+          metadata (if original-metadata
+                     (merge-metadata original-metadata metadata)
+                     metadata)]
+      (rff metadata))))

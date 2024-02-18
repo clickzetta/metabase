@@ -4,17 +4,20 @@
    [medley.core :as m]
    [metabase.driver :as driver]
    [metabase.lib.test-metadata :as meta]
+   [metabase.lib.test-util :as lib.tu]
    [metabase.lib.test-util.macros :as lib.tu.macros]
-   [metabase.query-processor :as qp]
    [metabase.query-processor.middleware.add-source-metadata
     :as add-source-metadata]
+   [metabase.query-processor.preprocess :as qp.preprocess]
    [metabase.query-processor.store :as qp.store]
    [metabase.test :as mt]
    [metabase.util :as u]))
 
 (defn- add-source-metadata [query]
   (driver/with-driver :h2
-    (qp.store/with-metadata-provider meta/metadata-provider
+    (qp.store/with-metadata-provider (if (qp.store/initialized?)
+                                       (qp.store/metadata-provider)
+                                       meta/metadata-provider)
       (add-source-metadata/add-source-metadata-for-source-queries query))))
 
 (defn- results-col [col]
@@ -33,9 +36,11 @@
   ([& field-names]
    (let [field-ids (map #(meta/id :venues (keyword (u/lower-case-en (name %))))
                         field-names)]
-     (qp.store/with-metadata-provider meta/metadata-provider
+     (qp.store/with-metadata-provider (if (qp.store/initialized?)
+                                        (qp.store/metadata-provider)
+                                        meta/metadata-provider)
        (results-metadata
-        (qp/query->expected-cols
+        (qp.preprocess/query->expected-cols
          (lib.tu.macros/mbql-query venues
            {:fields (for [id field-ids] [:field id nil])
             :limit  1})))))))
@@ -216,7 +221,7 @@
       (is (= (letfn [(metadata-with-count-field-ref [field-ref]
                        (concat
                         (venues-source-metadata :price)
-                        (let [[count-col] (results-metadata (qp/query->expected-cols
+                        (let [[count-col] (results-metadata (qp.preprocess/query->expected-cols
                                                              (lib.tu.macros/mbql-query venues
                                                                {:aggregation [[:count]]})))]
                           [(-> count-col
@@ -260,38 +265,39 @@
                :joins        [{:source-query {:source-table $$venues
                                               :fields       [$id $name]}}]}))))))
 
-(deftest binned-fields-test
+(deftest ^:parallel binned-fields-test
   (testing "source metadata should handle source queries that have binned fields"
-    (mt/with-temporary-setting-values [breakout-bin-width 5.0]
-      (qp.store/with-metadata-provider meta/metadata-provider
-        (is (= (lib.tu.macros/mbql-query venues
-                 {:source-query    {:source-table $$venues
-                                    :aggregation  [[:count]]
-                                    :breakout     [[:field %latitude {:binning {:strategy :default}}]]}
-                  :source-metadata (concat
-                                    (let [[lat-col]   (venues-source-metadata :latitude)
-                                          [count-col] (results-metadata (qp/query->expected-cols
-                                                                         (lib.tu.macros/mbql-query venues
-                                                                           {:aggregation [[:count]]})))]
-                                      [(assoc lat-col :field_ref [:field
-                                                                  (meta/id :venues :latitude)
-                                                                  {:binning {:strategy  :bin-width
-                                                                             :min-value 10.0
-                                                                             :max-value 45.0
-                                                                             :num-bins  7
-                                                                             :bin-width 5.0}}])
-                                       ;; computed column doesn't have an effective type in middleware before query
-                                       (-> count-col
-                                           (dissoc :effective_type)
-                                           ;; the type that comes back from H2 is :type/BigInteger but the type that comes
-                                           ;; back from calculating it with MLv2 is just plain :type/Integer
-                                           (assoc :base_type :type/Integer))]))})
-               (add-source-metadata
-                (lib.tu.macros/mbql-query venues
-                  {:source-query
-                   {:source-table $$venues
-                    :aggregation  [[:count]]
-                    :breakout     [[:field %latitude {:binning {:strategy :default}}]]}}))))))))
+    (qp.store/with-metadata-provider (lib.tu/mock-metadata-provider
+                                      meta/metadata-provider
+                                      {:settings {:breakout-bin-width 5.0}})
+      (is (= (lib.tu.macros/mbql-query venues
+               {:source-query    {:source-table $$venues
+                                  :aggregation  [[:count]]
+                                  :breakout     [[:field %latitude {:binning {:strategy :default}}]]}
+                :source-metadata (concat
+                                  (let [[lat-col]   (venues-source-metadata :latitude)
+                                        [count-col] (results-metadata (qp.preprocess/query->expected-cols
+                                                                       (lib.tu.macros/mbql-query venues
+                                                                         {:aggregation [[:count]]})))]
+                                    [(assoc lat-col :field_ref [:field
+                                                                (meta/id :venues :latitude)
+                                                                {:binning {:strategy  :bin-width
+                                                                           :min-value 10.0
+                                                                           :max-value 45.0
+                                                                           :num-bins  7
+                                                                           :bin-width 5.0}}])
+                                     ;; computed column doesn't have an effective type in middleware before query
+                                     (-> count-col
+                                         (dissoc :effective_type)
+                                         ;; the type that comes back from H2 is :type/BigInteger but the type that comes
+                                         ;; back from calculating it with MLv2 is just plain :type/Integer
+                                         (assoc :base_type :type/Integer))]))})
+             (add-source-metadata
+              (lib.tu.macros/mbql-query venues
+                {:source-query
+                 {:source-table $$venues
+                  :aggregation  [[:count]]
+                  :breakout     [[:field %latitude {:binning {:strategy :default}}]]}})))))))
 
 (deftest ^:parallel deduplicate-column-names-test
   (testing "Metadata that gets added to source queries should have deduplicated column names"
@@ -353,9 +359,9 @@
                                               :order-by     [[:asc $id]]
                                               :limit        2}})
           metadata          (qp.store/with-metadata-provider meta/metadata-provider
-                              (qp/query->expected-cols query))
+                              (qp.preprocess/query->expected-cols query))
           ;; the actual metadata this middleware should return. Doesn't have all the columns that come back from
-          ;; `qp/query->expected-cols`
+          ;; `qp.preprocess/query->expected-cols`
           expected-metadata (for [col metadata]
                               (cond-> (merge (results-col col) (select-keys col [:source_alias]))
                                 ;; for some reason this middleware returns temporal fields with a `:default` unit,

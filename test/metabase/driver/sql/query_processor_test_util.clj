@@ -2,10 +2,9 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer :all]
-   [metabase.db.query :as mdb.query]
    [metabase.driver :as driver]
    [metabase.driver.util :as driver.u]
-   [metabase.query-processor :as qp]
+   [metabase.query-processor.compile :as qp.compile]
    [metabase.util :as u]))
 
 (set! *warn-on-reflection* true)
@@ -99,7 +98,7 @@
                             query))
 
   ([_driver query]
-   (qp/compile query)))
+   (qp.compile/compile query)))
 
 (def ^{:arglists '([query] [driver query])} query->sql
   "Compile an MBQL query to 'pretty' SQL (i.e., remove quote marks and `public.` qualifiers)."
@@ -124,7 +123,7 @@
             (cond
               (and (string? native)
                    (isa? driver/hierarchy driver :sql))
-              (mdb.query/format-sql native driver)
+              (driver/prettify-native-form driver native)
 
               (string? native)
               native

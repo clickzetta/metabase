@@ -8,14 +8,14 @@ import type {
   SearchFilterDropdown,
   SearchFilterPropTypes,
 } from "metabase/search/types";
-import { Text, Box, Center, Button, Stack } from "metabase/ui";
-import type { IconName } from "metabase/core/components/Icon";
-import { Icon } from "metabase/core/components/Icon";
+import { Text, Box, Center, Button, Stack, Icon } from "metabase/ui";
+import type { IconName } from "metabase/ui";
+
 import Popover from "metabase/components/Popover";
 import { useSelector } from "metabase/lib/redux";
 import { getIsNavbarOpen } from "metabase/selectors/app";
 import useIsSmallScreen from "metabase/hooks/use-is-small-screen";
-import { isNotNull } from "metabase/core/utils/types";
+import { isNotNull } from "metabase/lib/types";
 import {
   GroupOverflowHidden,
   DropdownFieldSet,
@@ -101,7 +101,7 @@ export const DropdownSidebarFilter = ({
     >
       <DropdownFieldSet
         noPadding
-        legend={fieldHasValue ? label() : null}
+        legend={fieldHasValue ? label() : undefined}
         fieldHasValueOrFocus={fieldHasValue}
       >
         <GroupOverflowHidden position="apart" noWrap w="100%">

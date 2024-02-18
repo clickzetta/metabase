@@ -1,7 +1,7 @@
 import _ from "underscore";
 import { getIn } from "icepick";
 import type { DatasetColumn, VisualizationSettings } from "metabase-types/api";
-import { isNotNull } from "metabase/core/utils/types";
+import { isNotNull } from "metabase/lib/types";
 import { formatNullable } from "metabase/lib/formatting/nullable";
 import type {
   ChartColumns,
@@ -37,7 +37,6 @@ const getMetricColumnData = (
   visualizationSettings: VisualizationSettings,
 ) => {
   return Object.entries(metricDatum).map(([columnName, value]) => {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const col = columns.find(column => column.name === columnName)!;
     const key =
       getIn(visualizationSettings, ["series_settings", col.name, "title"]) ??

@@ -1,6 +1,7 @@
 import _ from "underscore";
 import { getIn } from "icepick";
 import querystring from "querystring";
+import * as Lib from "metabase-lib";
 import * as Urls from "metabase/lib/urls";
 import { renderLinkURLForClick } from "metabase/lib/formatting/link";
 import {
@@ -73,11 +74,16 @@ export function getDashboardDrillUrl(clicked) {
     clickBehavior,
   );
 
-  const queryParams = getParameterValuesBySlug(parameterMapping, {
+  const baseQueryParams = getParameterValuesBySlug(parameterMapping, {
     data,
     extraData,
     clickBehavior,
   });
+
+  const queryParams =
+    typeof clickBehavior.tabId === "undefined"
+      ? baseQueryParams
+      : { ...baseQueryParams, tab: clickBehavior.tabId };
 
   const path = Urls.dashboard({ id: targetId });
   return `${path}?${querystring.stringify(queryParams)}`;
@@ -111,7 +117,11 @@ export function getDashboardDrillQuestionUrl(question, clicked) {
     clickBehavior,
   });
 
-  return targetQuestion.isStructured()
+  const isTargetQuestionNative = Lib.queryDisplayInfo(
+    targetQuestion.query(),
+  ).isNative;
+
+  return !isTargetQuestionNative
     ? ML_Urls.getUrlWithParameters(targetQuestion, parameters, queryParams)
     : `${ML_Urls.getUrl(targetQuestion)}?${querystring.stringify(queryParams)}`;
 }

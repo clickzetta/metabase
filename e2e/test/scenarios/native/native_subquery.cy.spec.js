@@ -26,7 +26,7 @@ describe("scenarios > question > native subquery", () => {
         native: {
           query: "SELECT id AS another_unique_column_name FROM PEOPLE",
         },
-        dataset: true,
+        type: "model",
       }).then(({ body: { id: questionId2 } }) => {
         const tagName1 = `#${questionId1}-a-people-question`;
         const queryText = `{{${tagName1}}}`;
@@ -70,7 +70,7 @@ describe("scenarios > question > native subquery", () => {
         native: {
           query: "SELECT id FROM PEOPLE",
         },
-        dataset: true,
+        type: "model",
       }).then(({ body: { id: questionId2 } }) => {
         // Move question 2 to personal collection
         cy.visit(`/question/${questionId2}`);
@@ -308,23 +308,27 @@ describe("scenarios > question > native subquery", () => {
     );
   });
 
-  it("should be able to reference a saved native question that ends with a semicolon `;` (metabase#28218)", () => {
-    const questionDetails = {
-      name: "28218",
-      native: { query: "select 1;" }, // semicolon is important here
-    };
+  it(
+    "should be able to reference a saved native question that ends with a semicolon `;` (metabase#28218)",
+    { tags: "@flaky" },
+    () => {
+      const questionDetails = {
+        name: "28218",
+        native: { query: "select 1;" }, // semicolon is important here
+      };
 
-    cy.createNativeQuestion(questionDetails).then(
-      ({ body: { id: baseQuestionId } }) => {
-        const tagID = `#${baseQuestionId}`;
+      cy.createNativeQuestion(questionDetails).then(
+        ({ body: { id: baseQuestionId } }) => {
+          const tagID = `#${baseQuestionId}`;
 
-        startNewNativeQuestion();
-        SQLFilter.enterParameterizedQuery(`SELECT * FROM {{${tagID}`);
+          startNewNativeQuestion();
+          SQLFilter.enterParameterizedQuery(`SELECT * FROM {{${tagID}`);
 
-        runNativeQuery();
+          runNativeQuery();
 
-        cy.get(".cellData").should("contain", "1");
-      },
-    );
-  });
+          cy.get(".cellData").should("contain", "1");
+        },
+      );
+    },
+  );
 });

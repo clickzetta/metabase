@@ -1,7 +1,7 @@
 import type { ComponentType, HTMLAttributes, ReactNode } from "react";
 import { t } from "ttag";
 
-import type { IconName, IconProps } from "metabase/core/components/Icon";
+import type { IconName, IconProps } from "metabase/ui";
 import PluginPlaceholder from "metabase/plugins/components/PluginPlaceholder";
 
 import type {
@@ -14,17 +14,28 @@ import type {
   Bookmark,
   Collection,
   CollectionAuthorityLevelConfig,
+  CollectionEssentials,
+  CollectionInstanceAnaltyicsConfig,
+  Dashboard,
   Dataset,
   Group,
   GroupPermissions,
   GroupsPermissions,
   Revision,
+  SearchResult,
   User,
   UserListResult,
 } from "metabase-types/api";
+
+import { UNABLE_TO_CHANGE_ADMIN_PERMISSIONS } from "metabase/admin/permissions/constants/messages";
+
 import type { AdminPathKey, State } from "metabase-types/store";
 import type { ADMIN_SETTINGS_SECTIONS } from "metabase/admin/settings/selectors";
 import type { SearchFilterComponent } from "metabase/search/types";
+import type {
+  AvailableModelFilters,
+  ModelFilterControlsProps,
+} from "metabase/browse/utils";
 import type Question from "metabase-lib/Question";
 
 import type Database from "metabase-lib/metadata/Database";
@@ -104,7 +115,9 @@ export const PLUGIN_DATA_PERMISSIONS: {
 };
 
 // user form fields, e.x. login attributes
-export const PLUGIN_ADMIN_USER_FORM_FIELDS = [];
+export const PLUGIN_ADMIN_USER_FORM_FIELDS = {
+  FormLoginAttributes: PluginPlaceholder,
+};
 
 // menu items in people management tab
 export const PLUGIN_ADMIN_USER_MENU_ITEMS = [];
@@ -122,6 +135,10 @@ export const PLUGIN_SELECTORS = {
   canWhitelabel: (_state: State) => false,
   getLoadingMessage: (_state: State) => t`Doing science...`,
   getIsWhiteLabeling: (_state: State) => false,
+  // eslint-disable-next-line no-literal-metabase-strings -- This is the actual Metabase name, so we don't want to translate it.
+  getApplicationName: (_state: State) => "Metabase",
+  getShowMetabaseLinks: (_state: State) => true,
+  getDashboardOverviewId: (_state: State) => undefined,
 };
 
 export const PLUGIN_FORM_WIDGETS: Record<string, ComponentType<any>> = {};
@@ -152,8 +169,20 @@ export const PLUGIN_COLLECTIONS = {
   AUTHORITY_LEVEL: {
     [JSON.stringify(AUTHORITY_LEVEL_REGULAR.type)]: AUTHORITY_LEVEL_REGULAR,
   },
+  COLLECTION_TYPES: {
+    [JSON.stringify(AUTHORITY_LEVEL_REGULAR.type)]: AUTHORITY_LEVEL_REGULAR,
+  },
   REGULAR_COLLECTION: AUTHORITY_LEVEL_REGULAR,
   isRegularCollection: (_: Partial<Collection> | Bookmark) => true,
+  getCollectionType: (
+    _: Partial<Collection>,
+  ): CollectionAuthorityLevelConfig | CollectionInstanceAnaltyicsConfig =>
+    AUTHORITY_LEVEL_REGULAR,
+  getInstanceAnalyticsCustomCollection: (
+    _collections: Collection[],
+  ): Collection | null => null,
+  CUSTOM_INSTANCE_ANALYTICS_COLLECTION_ENTITY_ID: "",
+  INSTANCE_ANALYTICS_ADMIN_READONLY_MESSAGE: UNABLE_TO_CHANGE_ADMIN_PERMISSIONS,
   getAuthorityLevelMenuItems: (
     _collection: Collection,
     _onUpdate: (collection: Collection, values: Partial<Collection>) => void,
@@ -167,7 +196,14 @@ export type CollectionAuthorityLevelIcon = ComponentType<
   }
 >;
 
-type FormCollectionAuthorityLevelPicker = ComponentType<
+type CollectionInstanceAnalyticsIcon = React.ComponentType<
+  Omit<IconProps, "name"> & {
+    collection: Collection;
+    entity: "collection" | "question" | "model" | "dashboard";
+  }
+>;
+
+type FormCollectionAuthorityLevelPicker = React.ComponentType<
   HTMLAttributes<HTMLDivElement> & { name: string; title?: string }
 >;
 
@@ -176,6 +212,8 @@ export const PLUGIN_COLLECTION_COMPONENTS = {
     PluginPlaceholder as CollectionAuthorityLevelIcon,
   FormCollectionAuthorityLevelPicker:
     PluginPlaceholder as FormCollectionAuthorityLevelPicker,
+  CollectionInstanceAnalyticsIcon:
+    PluginPlaceholder as CollectionInstanceAnalyticsIcon,
 };
 
 export type RevisionOrModerationEvent = {
@@ -193,39 +231,42 @@ export const PLUGIN_MODERATION = {
   QuestionModerationButton: PluginPlaceholder,
   ModerationReviewBanner: PluginPlaceholder,
   ModerationStatusIcon: PluginPlaceholder,
-  getStatusIcon: (moderated_status?: string): string | IconProps | undefined =>
+  getQuestionIcon: PluginPlaceholder,
+  getStatusIcon: (_moderated_status?: string): string | IconProps | undefined =>
     undefined,
   getModerationTimelineEvents: (
-    reviews: any,
-    usersById: Record<string, UserListResult>,
-    currentUser: User | null,
+    _reviews: any,
+    _usersById: Record<string, UserListResult>,
+    _currentUser: User | null,
   ) => [] as RevisionOrModerationEvent[],
   getMenuItems: (
-    question?: Question,
-    isModerator?: boolean,
-    reload?: () => void,
+    _question?: Question,
+    _isModerator?: boolean,
+    _reload?: () => void,
   ) => [],
 };
 
 export const PLUGIN_CACHING = {
   dashboardCacheTTLFormField: null,
   questionCacheTTLFormField: null,
-  getQuestionsImplicitCacheTTL: (question?: any) => null,
+  getQuestionsImplicitCacheTTL: (_question?: any) => null,
   QuestionCacheSection: PluginPlaceholder,
   DashboardCacheSection: PluginPlaceholder,
   DatabaseCacheTimeField: PluginPlaceholder,
   isEnabled: () => false,
-  hasQuestionCacheSection: (question: Question) => false,
+  hasQuestionCacheSection: (_question: Question) => false,
 };
 
 export const PLUGIN_REDUCERS: {
   applicationPermissionsPlugin: any;
   sandboxingPlugin: any;
   shared: any;
+  auditInfo: any;
 } = {
   applicationPermissionsPlugin: () => null,
   sandboxingPlugin: () => null,
   shared: () => null,
+  auditInfo: () => null,
 };
 
 export const PLUGIN_ADVANCED_PERMISSIONS = {
@@ -284,7 +325,7 @@ export const PLUGIN_GROUP_MANAGERS: PluginGroupManagersType = {
 export const PLUGIN_MODEL_PERSISTENCE = {
   isModelLevelPersistenceEnabled: () => false,
   ModelCacheControl: PluginPlaceholder as any,
-  getMenuItems: (question?: any, onChange?: any) => ({}),
+  getMenuItems: (_question?: any, _onChange?: any) => ({}),
 };
 
 export const PLUGIN_EMBEDDING = {
@@ -293,4 +334,19 @@ export const PLUGIN_EMBEDDING = {
 
 export const PLUGIN_CONTENT_VERIFICATION = {
   VerifiedFilter: {} as SearchFilterComponent<"verified">,
+  availableModelFilters: {} as AvailableModelFilters,
+  ModelFilterControls: (() => null) as ComponentType<ModelFilterControlsProps>,
+  sortModelsByVerification: (_a: SearchResult, _b: SearchResult) => 0,
+  sortCollectionsByVerification: (
+    _a: CollectionEssentials,
+    _b: CollectionEssentials,
+  ) => 0,
+};
+
+export const PLUGIN_DASHBOARD_HEADER = {
+  extraButtons: (_dashboard: Dashboard) => [],
+};
+
+export const PLUGIN_QUERY_BUILDER_HEADER = {
+  extraButtons: (_question: Question) => [],
 };

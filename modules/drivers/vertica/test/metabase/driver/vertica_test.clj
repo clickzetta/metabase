@@ -2,10 +2,9 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer :all]
-   [metabase.db.query :as mdb.query]
    [metabase.driver :as driver]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
-   [metabase.query-processor :as qp]
+   [metabase.query-processor.compile :as qp.compile]
    [metabase.test :as mt]))
 
 (set! *warn-on-reflection* true)
@@ -26,8 +25,8 @@
                                                              :additional-options "ConnectionLoadBalance=1"})))))
 
 (defn- compile-query [query]
-  (-> (qp/compile query)
-      (update :query #(str/split-lines (mdb.query/format-sql % :vertica)))))
+  (-> (qp.compile/compile query)
+      (update :query #(str/split-lines (driver/prettify-native-form :vertica %)))))
 
 (deftest ^:parallel percentile-test
   (mt/test-driver :vertica

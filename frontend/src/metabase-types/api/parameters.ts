@@ -1,6 +1,6 @@
 import type { CardId } from "./card";
 import type { RowValue } from "./dataset";
-import type { LocalFieldReference } from "./query";
+import type { ConcreteFieldReference, ExpressionReference } from "./query";
 
 export type StringParameterType =
   | "string/="
@@ -22,8 +22,8 @@ export type DateParameterType =
   | "date/range"
   | "date/relative"
   | "date/month-year"
-  | "date/quarter-year";
-("date/all-options");
+  | "date/quarter-year"
+  | "date/all-options";
 
 export type ParameterType =
   | StringParameterType
@@ -74,10 +74,15 @@ export type ParameterTarget =
   | ParameterDimensionTarget
   | ParameterTextTarget;
 
-type DimensionTarget = LocalFieldReference;
-export type ParameterDimensionTarget = [
+export type ParameterDimensionTarget =
+  | NativeParameterDimensionTarget
+  | StructuredParameterDimensionTarget;
+
+export type NativeParameterDimensionTarget = ["dimension", VariableTarget];
+
+export type StructuredParameterDimensionTarget = [
   "dimension",
-  DimensionTarget | VariableTarget,
+  ConcreteFieldReference | ExpressionReference,
 ];
 
 export type ParameterValueOrArray = string | number | Array<any>;

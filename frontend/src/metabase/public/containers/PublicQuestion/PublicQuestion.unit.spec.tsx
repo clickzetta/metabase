@@ -1,5 +1,6 @@
 import { Route } from "react-router";
 
+import { fireEvent } from "@testing-library/react";
 import { renderWithProviders, screen, within } from "__support__/ui";
 import {
   setupPublicCardQueryEndpoints,
@@ -9,9 +10,10 @@ import registerVisualizations from "metabase/visualizations/register";
 import { createMockState } from "metabase-types/store/mocks";
 import {
   createMockPublicCard,
-  createMockPublicDataset,
+  createMockEmbedDataset,
 } from "metabase-types/api/mocks";
 
+import type { VisualizationProps } from "metabase/visualizations/types";
 import { PublicQuestion } from "./PublicQuestion";
 
 registerVisualizations();
@@ -20,6 +22,39 @@ const FAKE_UUID = "123456";
 
 const QUESTION_NAME = "Public question";
 
+const VisualizationMock = ({
+  onUpdateVisualizationSettings,
+  rawSeries,
+}: VisualizationProps) => {
+  const [
+    {
+      card,
+      data: { rows },
+    },
+  ] = rawSeries;
+
+  return (
+    <div>
+      <div>
+        {rows[0].map((value, i) => (
+          <span key={i}>{value}</span>
+        ))}
+      </div>
+      <div data-testid="settings">
+        {JSON.stringify(card.visualization_settings)}
+      </div>
+      <button onClick={() => onUpdateVisualizationSettings({ foo: "bar" })}>
+        update settings
+      </button>
+    </div>
+  );
+};
+
+jest.mock(
+  "metabase/visualizations/components/Visualization",
+  () => VisualizationMock,
+);
+
 async function setup() {
   setupPublicQuestionEndpoints(
     FAKE_UUID,
@@ -27,7 +62,7 @@ async function setup() {
   );
   setupPublicCardQueryEndpoints(
     FAKE_UUID,
-    createMockPublicDataset({
+    createMockEmbedDataset({
       data: { rows: [["John W."]] },
     }),
   );
@@ -57,5 +92,19 @@ describe("PublicQuestion", () => {
     expect(
       within(screen.getByRole("banner")).getByText(QUESTION_NAME),
     ).toBeInTheDocument();
+  });
+
+  it("should update card settings when visualization component changes them (metabase#37429)", async () => {
+    await setup();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /update settings/i,
+      }),
+    );
+
+    expect(screen.getByTestId("settings")).toHaveTextContent(
+      JSON.stringify({ foo: "bar" }),
+    );
   });
 });

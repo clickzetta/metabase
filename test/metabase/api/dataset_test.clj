@@ -43,7 +43,7 @@
                    (m/dissoc-in [:data :results_metadata])
                    (m/dissoc-in [:data :insights]))]
      (cond
-       (contains? #{:id :started_at :running_time :hash} k)
+       (contains? #{:id :started_at :running_time :hash :cache_hash} k)
        [k (boolean v)]
 
        (and (= :data k) (contains? v :native_form))
@@ -103,11 +103,13 @@
                   :native       false
                   :pulse_id     nil
                   :card_id      nil
+                  :is_sandboxed false
                   :dashboard_id nil
                   :error        nil
                   :id           true
                   :action_id    nil
                   :cache_hit    false
+                  :cache_hash   false
                   :database_id  (mt/id)
                   :started_at   true
                   :running_time true}
@@ -126,21 +128,25 @@
             result (mt/user-http-request :rasta :post 202 "dataset" query)]
         (testing "\nAPI Response"
           (is (malli= [:map
-                       [:data        [:fn #(= % {:rows [] :cols []})]]
+                       [:data        [:map
+                                      [:rows [:= []]]
+                                      [:cols [:= []]]]]
                        [:row_count   [:= 0]]
                        [:status      [:= "failed"]]
                        [:context     [:= "ad-hoc"]]
                        [:error       #"Syntax error in SQL statement"]
-                       [:json_query  [:fn #(= % (merge
-                                                  query-defaults
-                                                  {:database (mt/id)
-                                                   :type     "native"
-                                                   :native   {:query "foobar"}}))]]
+                       [:json_query  [:map
+                                      [:database   [:= (mt/id)]]
+                                      [:type       [:= "native"]]
+                                      [:native     [:map
+                                                    [:query [:= "foobar"]]]]
+                                      [:middleware [:map
+                                                    [:add-default-userland-constraints? [:= true]]
+                                                    [:js-int-to-string?                 [:= true]]]]]]
                        [:database_id [:= (mt/id)]]
                        [:state       [:= "42000"]]
                        [:class       [:= "class org.h2.jdbc.JdbcSQLSyntaxErrorException"]]]
                       result)))
-
         (testing "\nSaved QueryExecution"
           (is (malli=
                [:map
@@ -361,7 +367,7 @@
 
 (deftest pivot-dataset-test
   (mt/test-drivers (api.pivots/applicable-drivers)
-    (mt/dataset sample-dataset
+    (mt/dataset test-data
       (testing "POST /api/dataset/pivot"
         (testing "Run a pivot table"
           (let [result (mt/user-http-request :rasta :post 202 "dataset/pivot" (api.pivots/pivot-query))
@@ -411,7 +417,7 @@
 
 (deftest pivot-filter-dataset-test
   (mt/test-drivers (api.pivots/applicable-drivers)
-    (mt/dataset sample-dataset
+    (mt/dataset test-data
       (testing "POST /api/dataset/pivot"
         (testing "Run a pivot table"
           (let [result (mt/user-http-request :rasta :post 202 "dataset/pivot" (api.pivots/filters-query))
@@ -428,7 +434,7 @@
 
 (deftest pivot-parameter-dataset-test
   (mt/test-drivers (api.pivots/applicable-drivers)
-    (mt/dataset sample-dataset
+    (mt/dataset test-data
       (testing "POST /api/dataset/pivot"
         (testing "Run a pivot table"
           (let [result (mt/user-http-request :rasta :post 202 "dataset/pivot" (api.pivots/parameters-query))
@@ -444,7 +450,7 @@
             (is (= [nil nil 3 2009] (last rows)))))))))
 
 (deftest parameter-values-test
-  (mt/dataset sample-dataset
+  (mt/dataset test-data
     (testing "static-list"
       (let [parameter {:values_query_type "list",
                        :values_source_type "static-list",

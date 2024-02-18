@@ -10,11 +10,13 @@
    [metabase.query-processor :as qp]
    [metabase.query-processor-test.date-time-zone-functions-test
     :as qp.datetime-test]
+   [metabase.query-processor.compile :as qp.compile]
    [metabase.query-processor.timezone :as qp.timezone]
    [metabase.test :as mt]
    [metabase.util :as u]
-   [schema.core :as s]
    [toucan2.core :as t2]))
+
+(set! *warn-on-reflection* true)
 
 (deftest ^:parallel query->collection-name-test
   (testing "query->collection-name"
@@ -60,7 +62,7 @@
                                 {"$project" {"_id" false, "count" true}}]
                   :collection  "attempts"
                   :mbql?       true}
-                 (qp/compile
+                 (qp.compile/compile
                   (mt/mbql-query attempts
                     {:aggregation [[:count]]
                      :filter      [:time-interval $datetime :last :month]})))))))))
@@ -101,15 +103,15 @@
                                   {"$project" {"_id" false, "count" true}}]
                     :collection  "attempts"
                     :mbql?       true}
-                   (qp/compile
+                   (qp.compile/compile
                     (mt/mbql-query attempts
                       {:aggregation [[:count]]
                        :filter      [:time-interval $datetime :last :month]}))))
 
             (testing "should still work even with bucketing bucketing"
-              (let [tz (qp.timezone/results-timezone-id :mongo mt/db)
+              (let [tz    (qp.timezone/results-timezone-id :mongo mt/db)
                     query (mt/with-metadata-provider (mt/id)
-                            (qp/compile
+                            (qp.compile/compile
                              (mt/mbql-query attempts
                                {:aggregation [[:count]]
                                 :breakout    [[:field %datetime {:temporal-unit :month}]
@@ -121,39 +123,38 @@
                                         [{"$expr" {"$gte" ["$datetime" {:$dateFromString {:dateString "2021-01-01T00:00Z"}}]}}
                                          {"$expr" {"$lt" ["$datetime" {:$dateFromString {:dateString "2021-02-01T00:00Z"}}]}}]}}
                                       {"$group" {"_id"   (if (date-arithmetic-supported?)
-                                                           {"datetime" {:$dateTrunc {:date "$datetime"
-                                                                                     :startOfWeek "sunday"
-                                                                                     :timezone tz
-                                                                                     :unit "month"}}
-                                                            "datetime_2" {:$dateTrunc {:date "$datetime"
+                                                           {"datetime"   {:$dateTrunc {:date        "$datetime"
                                                                                        :startOfWeek "sunday"
-                                                                                       :timezone tz
-                                                                                       :unit "day"}}}
-                                                           {"datetime" {:$let {:vars {:parts {:$dateToParts {:date "$datetime"
-                                                                                                             :timezone tz}}}
-                                                                               :in   {:$dateFromParts {:year  "$$parts.year"
-                                                                                                       :month "$$parts.month"
-                                                                                                       :timezone tz}}}}
-                                                            "datetime_2"   {:$let {:vars {:parts {:$dateToParts {:date "$datetime"
-                                                                                                                 :timezone tz}}}
-                                                                                   :in   {:$dateFromParts {:year  "$$parts.year"
-                                                                                                           :month "$$parts.month"
-                                                                                                           :day   "$$parts.day"
-                                                                                                           :timezone tz}}}}})
+                                                                                       :timezone    tz
+                                                                                       :unit        "month"}}
+                                                            "datetime_2" {:$dateTrunc {:date        "$datetime"
+                                                                                       :startOfWeek "sunday"
+                                                                                       :timezone    tz
+                                                                                       :unit        "day"}}}
+                                                           {"datetime"   {:$let {:vars {:parts {:$dateToParts {:date     "$datetime"
+                                                                                                               :timezone tz}}}
+                                                                                 :in   {:$dateFromParts {:year     "$$parts.year"
+                                                                                                         :month    "$$parts.month"
+                                                                                                         :timezone tz}}}}
+                                                            "datetime_2" {:$let {:vars {:parts {:$dateToParts {:date     "$datetime"
+                                                                                                               :timezone tz}}}
+                                                                                 :in   {:$dateFromParts {:year     "$$parts.year"
+                                                                                                         :month    "$$parts.month"
+                                                                                                         :day      "$$parts.day"
+                                                                                                         :timezone tz}}}}})
                                                  "count" {"$sum" 1}}}
                                       {"$sort" {"_id" 1}}
-                                      {"$project" {"_id"              false
-                                                   "datetime" "$_id.datetime"
-                                                   "datetime_2"   "$_id.datetime_2"
-                                                   "count"            true}}
+                                      {"$project" {"_id"        false
+                                                   "datetime"   "$_id.datetime"
+                                                   "datetime_2" "$_id.datetime_2"
+                                                   "count"      true}}
                                       {"$sort" {"datetime" 1}}]
                         :collection  "attempts"
                         :mbql?       true}
                        query))
                 (testing "Make sure we can actually run the query"
-                  (is (schema= {:status   (s/eq :completed)
-                                s/Keyword s/Any}
-                               (qp/process-query (mt/native-query query)))))))))))))
+                  (is (=? {:status :completed}
+                          (qp/process-query (mt/native-query query)))))))))))))
 
 (deftest ^:parallel field-filter-relative-time-native-test
   (mt/test-driver :mongo
@@ -221,7 +222,7 @@
                                 {"$project" {"_id" false, "count" true}}],
                   :collection  "tips",
                   :mbql?       true}
-                 (qp/compile
+                 (qp.compile/compile
                   (mt/mbql-query tips
                     {:aggregation [[:count]]
                      :filter      [:= $tips.source.username "tupac"]}))))
@@ -234,7 +235,7 @@
                                 {"$project" {"_id" false, "source.username" "$_id.source.username", "count" true}}]
                   :collection  "tips"
                   :mbql?       true}
-                 (qp/compile
+                 (qp.compile/compile
                   (mt/mbql-query tips
                     {:aggregation [[:count]]
                      :breakout    [$tips.source.username]}))))
@@ -272,7 +273,7 @@
                {"$limit" 5}],
               :collection  "venues"
               :mbql?       true}
-             (qp/compile
+             (qp.compile/compile
               (mt/mbql-query venues
                 {:aggregation [[:distinct $name]
                                [:distinct $price]]
@@ -287,7 +288,7 @@
       (is (= {"bob" "$latitude", "cobb" "$name"}
              (extract-projections
               ["bob" "cobb"]
-              (qp/compile
+              (qp.compile/compile
                (mt/mbql-query venues
                  {:fields      [[:expression "bob"] [:expression "cobb"]]
                   :expressions {:bob   [:field $latitude nil]
@@ -301,7 +302,7 @@
               "bob" {"$abs" "$latitude"}}
              (extract-projections
               ["bob" "cobb"]
-              (qp/compile
+              (qp.compile/compile
                (mt/mbql-query venues
                  {:fields      [[:expression "bob"] [:expression "cobb"]]
                   :expressions {:bob   [:abs $latitude]
@@ -314,7 +315,7 @@
       (is (= {"bob" {"$add" ["$price" 300]}}
              (extract-projections
               ["bob"]
-              (qp/compile
+              (qp.compile/compile
                (mt/mbql-query venues
                  {:fields      [[:expression "bob"]]
                   :expressions {:bob   [:+ $price 300]}
@@ -326,7 +327,7 @@
       (is (= {"bob" {"$abs" {"$subtract" ["$price" 300]}}}
              (extract-projections
               ["bob"]
-              (qp/compile
+              (qp.compile/compile
                (mt/mbql-query venues
                  {:fields      [[:expression "bob"]]
                   :expressions {:bob   [:abs [:- $price 300]]}
@@ -339,7 +340,7 @@
               "cobb" {"$ceil" {"$abs" "$latitude"}}}
              (extract-projections
               ["bob" "cobb"]
-              (qp/compile
+              (qp.compile/compile
                (mt/mbql-query venues
                  {:fields      [[:expression "bob"] [:expression "cobb"]]
                   :expressions {:bob  [:abs $latitude]
@@ -352,7 +353,7 @@
       (is (= {"bob" {"$ifNull" ["$latitude" "$price"]}}
              (extract-projections
               ["bob"]
-              (qp/compile
+              (qp.compile/compile
                (mt/mbql-query venues
                  {:expressions {:bob [:coalesce [:field $latitude nil] [:field $price nil]]}
                   :limit       5}))))))))
@@ -366,7 +367,7 @@
               :query [{"$group" {"_id" {"asdf" "$price"}, "count" {"$sum" 1}}}
                       {"$sort" {"_id" 1}}
                       {"$project" {"_id" false, "asdf" "$_id.asdf", "count" true}}]}
-             (qp/compile
+             (qp.compile/compile
               (mt/mbql-query venues
                 {:expressions {:asdf ["field" $price nil]},
                  :aggregation [["count"]],
@@ -401,7 +402,7 @@
                   {"$project" {"_id" false, "date" "$_id.date"}}
                   {"$limit" 1048575}]
                  (:query
-                  (qp/compile
+                  (qp.compile/compile
                    (mt/mbql-query checkins
                      {:filter   [:time-interval $date -4 :month]
                       :breakout [!day.date]}))))))))))
@@ -480,7 +481,7 @@
     :mongo
     (testing "Should use $expr for simple comparisons and ops for others"
       (are [x y] (partial= {:query [{"$match" x}]}
-                           (mt/compile (mt/mbql-query venues {:filter y})))
+                           (qp.compile/compile (mt/mbql-query venues {:filter y})))
         {"price" 100}
         [:= $price 100]
 
@@ -534,3 +535,38 @@
 
         {"$expr" {"$eq" ["$price" {"$add" [{"$subtract" ["$price" 5]} 100]}]}}
         [:= $price [:+ [:- $price 5] 100]]))))
+
+(deftest uniqe-alias-index-test
+  (mt/test-driver
+   :mongo
+   (testing "Field aliases have deterministic unique indices"
+     (let [query (mt/mbql-query
+                  nil
+                  {:joins [{:alias "Products"
+                            :source-table $$products
+                            :condition [:= &Products.products.id $orders.product_id]
+                            :fields :all}
+                           {:alias "People"
+                            :source-table $$people
+                            :condition [:= &People.people.id $orders.user_id]
+                            :fields :all}]
+                   :source-query {:source-table $$orders
+                                  :joins [{:alias "Products"
+                                           :source-table $$products
+                                           :condition [:= &Products.products.id $orders.product_id]
+                                           :fields :all}
+                                          {:alias "People"
+                                           :source-table $$people
+                                           :condition [:= &People.people.id $orders.user_id]
+                                           :fields :all}]}})
+           compiled (qp.compile/compile query)
+           indices (reduce (fn [acc lookup-stage]
+                             (let [let-var-name (-> (get-in lookup-stage ["$lookup" :let]) keys first)
+                                   ;; Following expression ensures index is an integer.
+                                   index (Integer/parseInt (re-find #"\d+$" let-var-name))]
+                               ;; Following expression tests that index is unique.
+                               (is (not (contains? acc index)))
+                               (conj acc index)))
+                           #{}
+                           (filter #(contains? % "$lookup") (:query compiled)))]
+       (is (= #{1 2 3 4} indices))))))

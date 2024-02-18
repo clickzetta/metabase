@@ -25,7 +25,6 @@
    [metabase.test :as mt]
    [metabase.test.mock.util :refer [pulse-channel-defaults]]
    [metabase.util :as u]
-   [schema.core :as s]
    [toucan2.core :as t2]
    [toucan2.tools.with-temp :as t2.with-temp]))
 
@@ -112,7 +111,8 @@
   {:errors
    {:cards (str "one or more value must be a map with the following keys "
                 "`(collection_id, description, display, id, include_csv, include_xls, name, dashboard_id, parameter_mappings)`, "
-                "or value must be a map with the keys `id`, `include_csv`, `include_xls`, and `dashboard_card_id`.")}})
+                "or value must be a map with the keys `id`, `include_csv`, `include_xls`, and `dashboard_card_id`., "
+                "or value must be a map with the keys `include_csv`, `include_xls`, and `dashboard_card_id`.")}})
 
 (deftest create-pulse-validation-test
   (doseq [[input expected-error]
@@ -383,7 +383,8 @@
   {:errors
    {:cards (str "nullable one or more value must be a map with the following keys "
                 "`(collection_id, description, display, id, include_csv, include_xls, name, dashboard_id, parameter_mappings)`, "
-                "or value must be a map with the keys `id`, `include_csv`, `include_xls`, and `dashboard_card_id`.")}})
+                "or value must be a map with the keys `id`, `include_csv`, `include_xls`, and `dashboard_card_id`., "
+                "or value must be a map with the keys `include_csv`, `include_xls`, and `dashboard_card_id`.")}})
 
 (deftest update-pulse-validation-test
   (testing "PUT /api/pulse/:id"
@@ -524,9 +525,8 @@
           ;; grant Permissions for only the *old* collection
           (perms/grant-collection-readwrite-permissions! (perms-group/all-users) collection)
           ;; now make an API call to move collections. Should fail
-          (is (schema= {:message (s/eq "You do not have curate permissions for this Collection.")
-                        s/Keyword s/Any}
-                       (mt/user-http-request :rasta :put 403 (str "pulse/" (u/the-id pulse)) {:collection_id (u/the-id new-collection)}))))))))
+          (is (=? {:message "You do not have curate permissions for this Collection."}
+                  (mt/user-http-request :rasta :put 403 (str "pulse/" (u/the-id pulse)) {:collection_id (u/the-id new-collection)}))))))))
 
 (deftest update-collection-position-test
   (testing "Can we change the Collection position of a Pulse?"
@@ -980,6 +980,30 @@
                                     :bcc?    true})
                (mt/regex-email-bodies #"Daily Sad Toucans")))))))
 
+(deftest send-placeholder-card-test-pulse-test
+  (testing "POST /api/pulse/test should work with placeholder cards"
+    (mt/with-temp [Dashboard {dashboard-id :id} {}]
+      (mt/with-fake-inbox
+        (is (= {:ok true}
+               (mt/user-http-request :rasta :post 200 "pulse/test" {:name          "Daily Sad Toucans"
+                                                                    :dashboard_id  dashboard-id
+                                                                    :cards         [{:display           "placeholder"
+                                                                                     :id                nil
+                                                                                     :include_csv       false
+                                                                                     :include_xls       false
+                                                                                     :dashboard_card_id nil}]
+                                                                    :channels      [{:enabled       true
+                                                                                     :channel_type  "email"
+                                                                                     :schedule_type "daily"
+                                                                                     :schedule_hour 12
+                                                                                     :schedule_day  nil
+                                                                                     :recipients    [(mt/fetch-user :rasta)]}]
+                                                                    :skip_if_empty false})))
+        (is (= (mt/email-to :rasta {:subject "Daily Sad Toucans"
+                                    :body    {"Daily Sad Toucans" true}
+                                    :bcc?    true})
+               (mt/regex-email-bodies #"Daily Sad Toucans")))))))
+
 ;; This test follows a flow that the user/UI would follow by first creating a pulse, then making a small change to
 ;; that pulse and testing it. The primary purpose of this test is to ensure tha the pulse/test endpoint accepts data
 ;; of the same format that the pulse GET returns
@@ -1022,23 +1046,14 @@
                                           :bcc?    true})
                      (mt/regex-email-bodies #"A Pulse"))))))))))
 
-(deftest pulse-card-query-results-test
-  (testing "A Card saved with `:async?` true should not be ran async for a Pulse"
-    (is (map? (#'api.pulse/pulse-card-query-results
-               {:id            1
-                :dataset_query {:database (mt/id)
-                                :type     :query
-                                :query    {:source-table (mt/id :venues)
-                                           :limit        1}
-                                :async?   true}}))))
+(deftest ^:parallel pulse-card-query-results-test
   (testing "viz-settings saved in the DB for a Card should be loaded"
     (is (some? (get-in (#'api.pulse/pulse-card-query-results
                         {:id            1
                          :dataset_query {:database (mt/id)
                                          :type     :query
                                          :query    {:source-table (mt/id :venues)
-                                                    :limit        1}
-                                         :async?   true}})
+                                                    :limit        1}}})
                        [:data :viz-settings])))))
 
 (deftest form-input-test
@@ -1091,17 +1106,17 @@
 
         (testing "If rendering a Pulse fails (e.g. because font registration failed) the endpoint should return the error message"
           (with-redefs [style/register-fonts-if-needed! (fn []
-                                                         (throw (ex-info "Can't register fonts!"
-                                                                         {}
-                                                                         (NullPointerException.))))]
+                                                          (throw (ex-info "Can't register fonts!"
+                                                                          {}
+                                                                          (NullPointerException.))))]
             (let [{{:strs [Content-Type]} :headers, :keys [body]} (preview 500)]
               (is (= "application/json; charset=utf-8"
                      Content-Type))
-              (is (schema= {:message  (s/eq "Can't register fonts!")
-                            :trace    s/Any
-                            :via      s/Any
-                            s/Keyword s/Any}
-                     body)))))))))
+              (is (malli= [:map
+                           [:message  [:= "Can't register fonts!"]]
+                           [:trace    :any]
+                           [:via      :any]]
+                          body)))))))))
 
 (deftest delete-subscription-test
   (testing "DELETE /api/pulse/:id/subscription"

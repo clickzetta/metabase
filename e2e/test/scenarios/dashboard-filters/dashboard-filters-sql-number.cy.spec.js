@@ -86,7 +86,7 @@ describe("scenarios > dashboard > filters > SQL > text/category", () => {
 
     filterWidget().click();
 
-    addWidgetNumberFilter("4.6");
+    addWidgetNumberFilter("4.6", { buttonLabel: "Update filter" });
 
     cy.get(".Card").within(() => {
       cy.findByText("Ergonomic Linen Toucan");
@@ -159,8 +159,8 @@ describe("scenarios > dashboard > filters > SQL > number", () => {
       questionDetails,
       dashboardDetails,
     }).then(({ body: { id, card_id, dashboard_id } }) => {
-      cy.request("PUT", `/api/dashboard/${dashboard_id}/cards`, {
-        cards: [
+      cy.request("PUT", `/api/dashboard/${dashboard_id}`, {
+        dashcards: [
           {
             id,
             card_id,

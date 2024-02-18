@@ -5,6 +5,7 @@
    [medley.core :as m]
    [metabase.api.common :as api]
    [metabase.automagic-dashboards.filters :as filters]
+   [metabase.automagic-dashboards.util :as magic.util]
    [metabase.models.card :as card]
    [metabase.models.collection :as collection]
    [metabase.public-settings :as public-settings]
@@ -17,15 +18,15 @@
 
 (def ^Long grid-width
   "Total grid width."
-  18)
+  24)
 
 (def ^Long default-card-width
   "Default card width."
-  6)
+  12)
 
 (def ^Long default-card-height
   "Default card height"
-  4)
+  6)
 
 (defn create-collection!
   "Create and return a new collection."
@@ -104,26 +105,32 @@
                                          qp.util/normalize-token
                                          (= :count)))
                          (->> breakout
-                              filters/collect-field-references
-                              (map filters/field-reference->id))
+                              magic.util/collect-field-references
+                              (map magic.util/field-reference->id))
                          aggregation)]
         {:graph.colors (map-to-colors color-keys)}))))
 
 (defn- visualization-settings
-  [{:keys [metrics x_label y_label series_labels visualization dimensions] :as card}]
-  (let [[display visualization-settings] visualization]
+  [{:keys [metrics x_label y_label series_labels visualization
+           dimensions dimension-name->field metric-definition]
+    :as   card}]
+  (let [{:keys [aggregation]} metric-definition
+        [display visualization-settings] visualization
+        viz-dims (mapv
+                   (comp :name dimension-name->field ffirst)
+                   dimensions)]
     {:display                display
      :visualization_settings (-> visualization-settings
                                  (assoc :graph.series_labels (map :name metrics)
-                                        :graph.metrics       (map :op metrics)
-                                        :graph.dimensions    dimensions)
+                                        :graph.metrics (mapv first aggregation)
+                                        :graph.dimensions (seq viz-dims))
                                  (merge (colorize card))
                                  (cond->
-                                     series_labels (assoc :graph.series_labels series_labels)
+                                   series_labels (assoc :graph.series_labels series_labels)
 
-                                     x_label       (assoc :graph.x_axis.title_text x_label)
+                                   x_label (assoc :graph.x_axis.title_text x_label)
 
-                                     y_label       (assoc :graph.y_axis.title_text y_label)))}))
+                                   y_label (assoc :graph.y_axis.title_text y_label)))}))
 
 
 (defn card-defaults
@@ -254,16 +261,16 @@
             cards)))
 
 (defn- shown-cards
-  "Pick up to `max-cards` with the highest `:score`.
+  "Pick up to `max-cards` with the highest `:card-score`.
    Keep groups together if possible by pulling all the cards within together and
-   using the same (highest) score for all.
-   Among cards with the same score those beloning to the largest group are
+   using the same (highest) card-score for all.
+   Among cards with the same card-score those beloning to the largest group are
    favourized, but it is still possible that not all cards in a group make it
    (consider a group of 4 cards which starts as 7/9; in that case only 2 cards
    from the group will be picked)."
   [max-cards cards]
   (->> cards
-       (sort-by :score >)
+       (sort-by :card-score >)
        (take max-cards)
        (group-by (some-fn :group hash))
        (map (fn [[_ group]]
@@ -273,6 +280,22 @@
        (mapcat :cards)))
 
 (def ^:private ^:const ^Long max-filters 4)
+
+(defn ordered-group-by-seq
+  "A seq from a group-by in a particular order. If you don't need the map itself, just to get the key value pairs in a
+  particular order. Clojure's `sorted-map-by` doesn't handle distinct keys with the same score. So this just iterates
+  over the groupby in a reasonable order."
+  [f key-order coll]
+  (letfn [(access [ks grouped]
+            (if (seq ks)
+              (let [k (first ks)]
+                (lazy-seq
+                 (if-let [x (find grouped k)]
+                   (cons x (access (next ks) (dissoc grouped k)))
+                   (access (next ks) grouped))))
+              (seq grouped)))]
+    (let [g (group-by f coll)]
+      (access key-order g))))
 
 (defn create-dashboard
   "Create dashboard and populate it with cards."
@@ -289,9 +312,12 @@
                         :parameters     []}
          cards         (shown-cards n cards)
          [dashboard _] (->> cards
-                            (partition-by :group)
-                            (reduce (fn [[dashboard grid] cards]
-                                      (let [group (some-> cards first :group groups)]
+                            (ordered-group-by-seq :group
+                                                  (when groups
+                                                    (sort-by (comp (fnil - 0) :score groups)
+                                                             (keys groups))))
+                            (reduce (fn [[dashboard grid] [group-name cards]]
+                                      (let [group (get groups group-name)]
                                         (add-group dashboard grid group cards)))
                                     [dashboard
                                      ;; Height doesn't need to be precise, just some
@@ -301,7 +327,7 @@
                      (count cards)
                      title
                      (str/join "; " (map :title cards))))
-     (cond-> dashboard
+     (cond-> (update dashboard :dashcards (partial sort-by (juxt :row :col)))
        (not-empty filters) (filters/add-filters filters max-filters)))))
 
 (defn- downsize-titles

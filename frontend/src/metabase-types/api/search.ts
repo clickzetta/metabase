@@ -1,6 +1,6 @@
 import type { UserId } from "metabase-types/api/user";
 import type { CardId } from "./card";
-import type { Collection } from "./collection";
+import type { Collection, CollectionId } from "./collection";
 import type { DatabaseId, InitialSyncStatus } from "./database";
 import type { FieldReference } from "./query";
 import type { TableId } from "./table";
@@ -12,10 +12,11 @@ export type EnabledSearchModelType =
   | "database"
   | "table"
   | "dataset"
-  | "action";
+  | "action"
+  | "indexed-entity";
 
 export type SearchModelType =
-  | ("segment" | "metric" | "pulse" | "indexed-entity" | "snippet")
+  | ("segment" | "metric" | "pulse" | "snippet")
   | EnabledSearchModelType;
 
 export interface SearchScore {
@@ -47,14 +48,19 @@ export interface SearchResults {
   total: number;
 }
 
+export type CollectionEssentials = Pick<
+  Collection,
+  "id" | "name" | "authority_level"
+>;
+
 export interface SearchResult {
-  id: number | undefined;
+  id: number;
   name: string;
   model: SearchModelType;
   description: string | null;
   archived: boolean | null;
   collection_position: number | null;
-  collection: Pick<Collection, "id" | "name" | "authority_level">;
+  collection: CollectionEssentials;
   table_id: TableId;
   bookmark: boolean | null;
   database_id: DatabaseId;
@@ -87,4 +93,6 @@ export interface SearchListQuery {
   table_db_id?: DatabaseId;
   limit?: number;
   offset?: number;
+  collection?: CollectionId;
+  filter_items_in_personal_collection?: "only" | "exclude";
 }

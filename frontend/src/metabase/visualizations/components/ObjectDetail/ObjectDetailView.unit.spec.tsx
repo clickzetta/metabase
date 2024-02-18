@@ -29,7 +29,7 @@ import {
   PEOPLE_ID,
   createSampleDatabase,
 } from "metabase-types/api/mocks/presets";
-import { checkNotNull } from "metabase/core/utils/types";
+import { checkNotNull } from "metabase/lib/types";
 import { ObjectDetailView } from "./ObjectDetailView";
 import type { ObjectDetailProps } from "./types";
 
@@ -503,7 +503,7 @@ describe("ObjectDetailView", () => {
 async function findActionInActionMenu({ name }: Pick<WritebackAction, "name">) {
   const actionsMenu = await screen.findByTestId("actions-menu");
   userEvent.click(actionsMenu);
-  const popover = await screen.findByTestId("popover");
+  const popover = await screen.findByRole("dialog");
   const action = within(popover).queryByText(name);
   return action;
 }

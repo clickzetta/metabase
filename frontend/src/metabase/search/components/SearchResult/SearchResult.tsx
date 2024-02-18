@@ -4,10 +4,11 @@ import { useCallback } from "react";
 import { push } from "react-router-redux";
 
 import { useDispatch } from "metabase/lib/redux";
-import { Group, Text, Loader } from "metabase/ui";
+import { Group, Loader, Icon } from "metabase/ui";
 import { isSyncCompleted } from "metabase/lib/syncing";
 
 import type { WrappedResult } from "metabase/search/types";
+
 import { InfoText } from "../InfoText";
 import { ItemIcon } from "./components";
 
@@ -19,6 +20,9 @@ import {
   ResultNameSection,
   ResultTitle,
   SearchResultContainer,
+  SearchResultDescription,
+  XRayButton,
+  XRaySection,
 } from "./SearchResult.styled";
 
 export function SearchResult({
@@ -36,6 +40,11 @@ export function SearchResult({
 }) {
   const { name, model, description, moderated_status }: WrappedResult = result;
 
+  const showXRayButton =
+    result.model === "indexed-entity" &&
+    result.id !== undefined &&
+    result.model_index_id !== null;
+
   const isActive = isItemActive(result);
   const isLoading = isItemLoading(result);
 
@@ -46,6 +55,15 @@ export function SearchResult({
       dispatch(push(nextLocation)),
     [dispatch],
   );
+
+  const onXRayClick = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    onChangeLocation(
+      `/auto/dashboard/model_index/${result.model_index_id}/primary_key/${result.id}`,
+    );
+  };
 
   const handleClick = (e: MouseEvent) => {
     e.stopPropagation();
@@ -93,32 +111,36 @@ export function SearchResult({
           </ResultTitle>
           <ModerationIcon status={moderated_status} filled size={14} />
         </Group>
-        <InfoText result={result} isCompact={compact} />
+        <InfoText showLinks={!onClick} result={result} isCompact={compact} />
+        {description && showDescription && (
+          <DescriptionSection>
+            <Group noWrap spacing="sm" data-testid="result-description">
+              <DescriptionDivider
+                size="md"
+                color="focus"
+                orientation="vertical"
+              />
+              <SearchResultDescription
+                dark
+                unwrapDisallowed
+                unstyleLinks
+                allowedElements={[]}
+              >
+                {description}
+              </SearchResultDescription>
+            </Group>
+          </DescriptionSection>
+        )}
       </ResultNameSection>
       {isLoading && (
         <LoadingSection px="xs">
           <Loader />
         </LoadingSection>
       )}
-      {description && showDescription && (
-        <DescriptionSection>
-          <Group noWrap spacing="sm">
-            <DescriptionDivider
-              size="md"
-              color="focus.0"
-              orientation="vertical"
-            />
-            <Text
-              data-testid="result-description"
-              color="text.1"
-              align="left"
-              size="sm"
-              lineClamp={2}
-            >
-              {description}
-            </Text>
-          </Group>
-        </DescriptionSection>
+      {showXRayButton && (
+        <XRaySection>
+          <XRayButton leftIcon={<Icon name="bolt" />} onClick={onXRayClick} />
+        </XRaySection>
       )}
     </SearchResultContainer>
   );

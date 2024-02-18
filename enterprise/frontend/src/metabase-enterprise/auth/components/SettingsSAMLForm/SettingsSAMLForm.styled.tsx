@@ -22,10 +22,13 @@ export const SAMLFormSection = styled.div<SAMLFormSectionProps>`
 
 export const SAMLFormCaption = styled.div`
   color: ${color("text-medium")};
-  margin-bottom: 1rem;
+  margin-bottom: 2rem;
 `;
 
 export const SAMLFormFooter = styled.div`
   display: flex;
-  gap: 0.5rem;
+  flex-direction: column;
+  align-items: start;
+  gap: 1rem;
+  margin-bottom: 1rem;
 `;

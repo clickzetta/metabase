@@ -1,8 +1,8 @@
 import { jt, t } from "ttag";
 import { SearchResults } from "metabase/nav/components/search/SearchResults";
 import type { WrappedResult } from "metabase/search/types";
-import { Text } from "metabase/ui";
-import { Icon } from "metabase/core/components/Icon";
+import { Text, Icon } from "metabase/ui";
+
 import type { SearchResultsFooter } from "metabase/nav/components/search/SearchResults";
 import {
   SearchDropdownFooter,
@@ -14,12 +14,14 @@ export type SearchResultsDropdownProps = {
   searchText: string;
   onSearchItemSelect: (item: WrappedResult) => void;
   goToSearchApp: () => void;
+  isSearchBar?: boolean;
 };
 
 export const SearchResultsDropdown = ({
   searchText,
   onSearchItemSelect,
   goToSearchApp,
+  isSearchBar = false,
 }: SearchResultsDropdownProps) => {
   const renderFooter: SearchResultsFooter = ({ metadata, isSelected }) => {
     const resultText =
@@ -55,6 +57,7 @@ export const SearchResultsDropdown = ({
         onEntitySelect={onSearchItemSelect}
         footerComponent={renderFooter}
         onFooterSelect={goToSearchApp}
+        isSearchBar={isSearchBar}
       />
     </SearchResultsContainer>
   );

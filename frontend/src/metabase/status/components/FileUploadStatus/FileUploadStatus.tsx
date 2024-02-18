@@ -1,39 +1,53 @@
+import _ from "underscore";
+
+import ErrorBoundary from "metabase/ErrorBoundary";
 import { useSelector, useDispatch } from "metabase/lib/redux";
 import { getAllUploads, clearAllUploads } from "metabase/redux/uploads";
-import Collections from "metabase/entities/collections/collections";
-import type { Collection } from "metabase-types/api";
+import type { CollectionId, TableId } from "metabase-types/api";
 import type { FileUpload } from "metabase-types/store/upload";
 import { isUploadAborted, isUploadInProgress } from "metabase/lib/uploads";
+import { isEmpty } from "metabase/lib/validate";
 
+import { useCollectionQuery, useTableQuery } from "metabase/common/hooks";
 import useStatusVisibility from "../../hooks/use-status-visibility";
 import FileUploadStatusLarge from "../FileUploadStatusLarge";
 
-const FileUploadStatus = ({
-  collections = [],
-}: {
-  collections: Collection[];
-}) => {
+export const FileUploadStatus = () => {
   const uploads = useSelector(getAllUploads);
   const dispatch = useDispatch();
   const resetUploads = () => dispatch(clearAllUploads());
 
-  const uploadCollections = collections.filter(collection =>
-    uploads.some(upload => upload.collectionId === collection.id),
+  const groupedTables = _.groupBy(
+    uploads.filter(upload => upload.tableId),
+    "tableId",
   );
+  const groupedCollections = _.groupBy(
+    uploads.filter(upload => upload.collectionId),
+    "collectionId",
+  );
+
+  const tables = Object.keys(groupedTables) as TableId[];
+  const collections = Object.keys(groupedCollections) as CollectionId[];
 
   return (
     <>
-      {uploadCollections.map(collection => {
-        const collectionUploads = uploads.filter(
-          ({ collectionId }) => collectionId === collection.id,
-        );
-
+      {tables.map(tableId => {
         return (
           <FileUploadStatusContent
-            key={`uploads-${collection.id}`}
-            uploads={collectionUploads}
+            key={`uploads-table-${tableId}`}
+            uploads={groupedTables[tableId]}
             resetUploads={resetUploads}
-            collection={collection}
+            tableId={tableId}
+          />
+        );
+      })}
+      {collections.map(collectionId => {
+        return (
+          <FileUploadStatusContent
+            key={`uploads-collection-${collectionId}`}
+            uploads={groupedCollections[collectionId]}
+            resetUploads={resetUploads}
+            collectionId={collectionId}
           />
         );
       })}
@@ -42,11 +56,13 @@ const FileUploadStatus = ({
 };
 
 const FileUploadStatusContent = ({
-  collection,
+  collectionId,
+  tableId,
   uploads,
   resetUploads,
 }: {
-  collection: Collection;
+  collectionId?: CollectionId;
+  tableId?: TableId;
   uploads: FileUpload[];
   resetUploads: () => void;
 }) => {
@@ -55,20 +71,31 @@ const FileUploadStatusContent = ({
   );
   const isVisible = useStatusVisibility(isActive);
 
-  if (!isVisible) {
+  const { isLoading: tableLoading, data: table } = useTableQuery({
+    id: tableId,
+    enabled: !isEmpty(tableId),
+  });
+  const { isLoading: collectionLoading, data: collection } = useCollectionQuery(
+    { id: collectionId, enabled: !isEmpty(collectionId) },
+  );
+
+  if (!isVisible || tableLoading || collectionLoading) {
+    return null;
+  }
+
+  const uploadDestination = table ?? collection;
+
+  if (!uploadDestination) {
     return null;
   }
 
   return (
-    <FileUploadStatusLarge
-      uploads={uploads}
-      resetUploads={resetUploads}
-      collection={collection}
-    />
+    <ErrorBoundary>
+      <FileUploadStatusLarge
+        uploads={uploads}
+        resetUploads={resetUploads}
+        uploadDestination={uploadDestination}
+      />
+    </ErrorBoundary>
   );
 };
-
-// eslint-disable-next-line import/no-default-export -- deprecated usage
-export default Collections.loadList({ loadingAndErrorWrapper: false })(
-  FileUploadStatus,
-);

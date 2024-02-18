@@ -2,9 +2,11 @@
   "Validation, transformation to canonical form, and loading of heuristics."
   (:gen-class)
   (:require
+   [clojure.set :as set]
    [clojure.string :as str]
    [metabase.automagic-dashboards.populate :as populate]
    [metabase.query-processor.util :as qp.util]
+   [metabase.shared.dashboards.constants :as dashboards.constants]
    [metabase.util :as u]
    [metabase.util.files :as u.files]
    [metabase.util.i18n :as i18n :refer [deferred-trs LocalizedString]]
@@ -94,7 +96,7 @@
 
 (def ^:private Card
   {Identifier {(s/required-key :title)         LocalizedString
-               (s/required-key :score)         Score
+               (s/required-key :card-score)    Score
                (s/optional-key :visualization) Visualization
                (s/optional-key :text)          LocalizedString
                (s/optional-key :dimensions)    [CardDimension]
@@ -113,6 +115,7 @@
 
 (def ^:private Groups
   {Identifier {(s/required-key :title)            LocalizedString
+               (s/required-key :score)            s/Int
                (s/optional-key :comparison_title) LocalizedString
                (s/optional-key :description)      LocalizedString}})
 
@@ -235,45 +238,45 @@
   (sc/coercer!
     DashboardTemplate
     {[s/Str]         u/one-or-many
-    [OrderByPair]   u/one-or-many
-    OrderByPair     (fn [x]
-                      (if (string? x)
-                        {x "ascending"}
-                        x))
-    Visualization   (fn [x]
-                      (if (string? x)
-                        [x {}]
-                        (first x)))
-    Metric          (comp (with-defaults {:score max-score})
-                          (shorthand-definition :metric))
-    Dimension       (comp (with-defaults {:score max-score})
-                          (shorthand-definition :field_type))
-    Filter          (comp (with-defaults {:score max-score})
-                          (shorthand-definition :filter))
-    Card            (with-defaults {:score  max-score
-                                    :width  populate/default-card-width
-                                    :height populate/default-card-height})
-    [CardDimension] u/one-or-many
-    CardDimension   (fn [x]
-                      (if (string? x)
-                        {x {}}
-                        x))
-    TableType       ->entity
-    FieldType       ->type
-    Identifier      (fn [x]
-                      (if (keyword? x)
-                        (name x)
-                        x))
-    Groups          (partial apply merge)
-    AppliesTo       (fn [x]
-                      (let [[table-type field-type] (str/split x #"\.")]
-                        (if field-type
-                          [(->entity table-type) (->type field-type)]
-                          [(if (-> table-type ->entity table-type?)
-                             (->entity table-type)
-                             (->type table-type))])))
-    LocalizedString (fn [s]
-                      (i18n/->UserLocalizedString s nil {}))}))
+     [OrderByPair]   u/one-or-many
+     OrderByPair     (fn [x]
+                       (if (string? x)
+                         {x "ascending"}
+                         x))
+     Visualization   (fn [x]
+                       (if (string? x)
+                         [x {}]
+                         (first x)))
+     Metric          (comp (with-defaults {:score max-score})
+                           (shorthand-definition :metric))
+     Dimension       (comp (with-defaults {:score max-score})
+                           (shorthand-definition :field_type))
+     Filter          (comp (with-defaults {:score max-score})
+                           (shorthand-definition :filter))
+     Card            (with-defaults {:card-score max-score
+                                     :width      populate/default-card-width
+                                     :height     populate/default-card-height})
+     [CardDimension] u/one-or-many
+     CardDimension   (fn [x]
+                       (if (string? x)
+                         {x {}}
+                         x))
+     TableType       ->entity
+     FieldType       ->type
+     Identifier      (fn [x]
+                       (if (keyword? x)
+                         (name x)
+                         x))
+     Groups          (partial apply merge)
+     AppliesTo       (fn [x]
+                       (let [[table-type field-type] (str/split x #"\.")]
+                         (if field-type
+                           [(->entity table-type) (->type field-type)]
+                           [(if (-> table-type ->entity table-type?)
+                              (->entity table-type)
+                              (->type table-type))])))
+     LocalizedString (fn [s]
+                       (i18n/->UserLocalizedString s nil {}))}))
 
 (def ^:private dashboard-templates-dir "automagic_dashboards/")
 
@@ -284,12 +287,30 @@
   [dashboard-template]
   (transduce (map (comp count ancestors)) + (:applies_to dashboard-template)))
 
+(defn- ensure-default-card-sizes
+  "Given a card definition from a template, fill in the card template with default width and height
+  values based on the template display type if those dimensions aren't already present."
+  [card-spec]
+  (update-vals
+    card-spec
+    (fn [{:keys [visualization] :as card-spec}]
+      (let [defaults (get-in dashboards.constants/card-size-defaults [(keyword visualization) :default])]
+        (into defaults card-spec)))))
+
+(defn- set-default-card-dimensions
+  "Update the card template dimensions to align with the default FE dimensions."
+  [dashboard-template]
+  (update dashboard-template :cards #(mapv ensure-default-card-sizes %)))
+
 (defn- make-dashboard-template
-  [entity-type r]
-  (-> r
+  [entity-type {:keys [cards] :as r}]
+  (-> (cond-> r
+        (seq cards)
+        (update :cards (partial mapv (fn [m] (update-vals m #(set/rename-keys % {:score :card-score}))))))
       (assoc :dashboard-template-name entity-type
              :specificity 0)
       (update :applies_to #(or % entity-type))
+      set-default-card-dimensions
       dashboard-template-validator
       (as-> dashboard-template
             (assoc dashboard-template

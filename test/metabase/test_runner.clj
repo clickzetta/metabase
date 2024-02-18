@@ -22,7 +22,7 @@
 
 (comment
   metabase.bootstrap/keep-me
-  ;; make sure stuff like `schema=` and what not are loaded
+  ;; make sure stuff like `=?` and what not are loaded
   metabase.test-runner.assert-exprs/keep-me
 
   ;; helpers for mvl2
@@ -77,7 +77,6 @@
    "local"
    "resources"
    "resources-ee"
-   "shared/src"
    "src"
    "target"
    "test_config"
@@ -87,6 +86,12 @@
   {:namespace-pattern   #"^metabase.*"
    :exclude-directories excluded-directories
    :test-warn-time      3000})
+
+(defn find-tests
+  "Find all tests, in case you wish to run them yourself."
+  ([] (find-tests {}))
+  ([options]
+   (hawk/find-tests nil (merge (default-options) options))))
 
 (defn find-and-run-tests-repl
   "Find and run tests from the REPL."

@@ -6,7 +6,7 @@
    [compojure.core :refer [POST]]
    [metabase.api.common :as api]
    [metabase.api.field :as api.field]
-   [metabase.db.query :as mdb.query]
+   [metabase.driver :as driver]
    [metabase.driver.util :as driver.u]
    [metabase.events :as events]
    [metabase.lib.schema.id :as lib.schema.id]
@@ -19,6 +19,7 @@
    [metabase.models.query :as query]
    [metabase.models.table :refer [Table]]
    [metabase.query-processor :as qp]
+   [metabase.query-processor.compile :as qp.compile]
    [metabase.query-processor.middleware.constraints :as qp.constraints]
    [metabase.query-processor.middleware.permissions :as qp.perms]
    [metabase.query-processor.pivot :as qp.pivot]
@@ -30,6 +31,7 @@
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]
+   [steffan-westcott.clj-otel.api.trace.span :as span]
    [toucan2.core :as t2]))
 
 ;;; -------------------------------------------- Running a Query Normally --------------------------------------------
@@ -45,40 +47,45 @@
     (api/read-check Card source-card-id)
     source-card-id))
 
-(defn- run-query-async
+(mu/defn ^:private run-streaming-query :- (ms/InstanceOfClass metabase.async.streaming_response.StreamingResponse)
   [{:keys [database], :as query}
-   & {:keys [context export-format qp-runner]
+   & {:keys [context export-format]
       :or   {context       :ad-hoc
-             export-format :api
-             qp-runner     qp/process-query-and-save-with-max-results-constraints!}}]
-  (when (and (not= (:type query) "internal")
-             (not= database lib.schema.id/saved-questions-virtual-database-id))
-    (when-not database
-      (throw (ex-info (tru "`database` is required for all queries whose type is not `internal`.")
-                      {:status-code 400, :query query})))
-    (api/read-check Database database))
-  ;; store table id trivially iff we get a query with simple source-table
-  (let [table-id (get-in query [:query :source-table])]
-    (when (int? table-id)
-      (events/publish-event! :event/table-read (assoc (t2/select-one Table :id table-id) :actor_id api/*current-user-id*))))
-  ;; add sensible constraints for results limits on our query
-  (let [source-card-id (query->source-card-id query)
-        source-card    (when source-card-id
-                         (t2/select-one [Card :result_metadata :dataset] :id source-card-id))
-        info           (cond-> {:executed-by api/*current-user-id*
-                                :context     context
-                                :card-id     source-card-id}
-                         (:dataset source-card)
-                         (assoc :metadata/dataset-metadata (:result_metadata source-card)))]
-    (binding [qp.perms/*card-id* source-card-id]
-      (qp.streaming/streaming-response [context export-format]
-        (qp-runner query info context)))))
+             export-format :api}}]
+  (span/with-span!
+    {:name "run-query-async"}
+    (when (and (not= (:type query) "internal")
+               (not= database lib.schema.id/saved-questions-virtual-database-id))
+      (when-not database
+        (throw (ex-info (tru "`database` is required for all queries whose type is not `internal`.")
+                        {:status-code 400, :query query})))
+      (api/read-check Database database))
+    ;; store table id trivially iff we get a query with simple source-table
+    (let [table-id (get-in query [:query :source-table])]
+      (when (int? table-id)
+        (events/publish-event! :event/table-read {:object  (t2/select-one Table :id table-id)
+                                                  :user-id api/*current-user-id*})))
+    ;; add sensible constraints for results limits on our query
+    (let [source-card-id (query->source-card-id query)
+          source-card    (when source-card-id
+                           (t2/select-one [Card :result_metadata :dataset] :id source-card-id))
+          info           (cond-> {:executed-by api/*current-user-id*
+                                  :context     context
+                                  :card-id     source-card-id}
+                           (:dataset source-card)
+                           (assoc :metadata/dataset-metadata (:result_metadata source-card)))]
+      (binding [qp.perms/*card-id* source-card-id]
+        (qp.streaming/streaming-response [rff export-format]
+          (qp/process-query (update query :info merge info) rff))))))
 
 (api/defendpoint POST "/"
   "Execute a query and retrieve the results in the usual format. The query will not use the cache."
   [:as {{:keys [database] :as query} :body}]
   {database [:maybe :int]}
-  (run-query-async (update-in query [:middleware :js-int-to-string?] (fnil identity true))))
+  (run-streaming-query
+   (-> query
+       (update-in [:middleware :js-int-to-string?] (fnil identity true))
+       qp/userland-query-with-default-constraints)))
 
 
 ;;; ----------------------------------- Downloading Query Results in Other Formats -----------------------------------
@@ -126,20 +133,18 @@
         viz-settings (-> (json/parse-string visualization_settings viz-setting-key-fn)
                          (update :table.columns mbql.normalize/normalize)
                          mb.viz/db->norm)
-        query        (-> (assoc query
-                                :async? true
-                                :viz-settings viz-settings)
+        query        (-> query
+                         (assoc :viz-settings viz-settings)
                          (dissoc :constraints)
                          (update :middleware #(-> %
                                                   (dissoc :add-default-userland-constraints? :js-int-to-string?)
                                                   (assoc :process-viz-settings? true
                                                          :skip-results-metadata? true
                                                          :format-rows? false))))]
-    (run-query-async
-     query
+    (run-streaming-query
+     (qp/userland-query query)
      :export-format export-format
-     :context       (export-format->context export-format)
-     :qp-runner     qp/process-query-and-save-execution!)))
+     :context       (export-format->context export-format))))
 
 
 ;;; ------------------------------------------------ Other Endpoints -------------------------------------------------
@@ -164,13 +169,11 @@
    pretty  [:maybe :boolean]}
   (binding [persisted-info/*allow-persisted-substitution* false]
     (qp.perms/check-current-user-has-adhoc-native-query-perms query)
-    (let [{q :query :as compiled} (qp/compile-and-splice-parameters query)
-          driver          (driver.u/database->driver database)
-          ;; Format the query unless we explicitly do not want to
-          formatted-query (if (false? pretty)
-                            q
-                            (or (u/ignore-exceptions (mdb.query/format-sql q driver)) q))]
-      (assoc compiled :query formatted-query))))
+    (let [driver (driver.u/database->driver database)
+          prettify (partial driver/prettify-native-form driver)
+          compiled (qp.compile/compile-and-splice-parameters query)]
+      (cond-> compiled
+        (not (false? pretty)) (update :query prettify)))))
 
 (api/defendpoint POST "/pivot"
   "Generate a pivoted dataset for an ad-hoc query"
@@ -181,12 +184,11 @@
   (api/read-check Database database)
   (let [info {:executed-by api/*current-user-id*
               :context     :ad-hoc}]
-    (qp.streaming/streaming-response [context :api]
+    (qp.streaming/streaming-response [rff :api]
       (qp.pivot/run-pivot-query (assoc query
-                                       :async? true
-                                       :constraints (qp.constraints/default-query-constraints))
-                                info
-                                context))))
+                                       :constraints (qp.constraints/default-query-constraints)
+                                       :info        info)
+                                rff))))
 
 (defn- parameter-field-values
   [field-ids query]

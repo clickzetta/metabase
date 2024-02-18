@@ -1,8 +1,10 @@
 (ns metabase-enterprise.sso.integrations.sso-utils
   "Functions shared by the various SSO implementations"
   (:require
+   [metabase-enterprise.sso.integrations.sso-settings :as sso-settings]
    [metabase.api.common :as api]
    [metabase.email.messages :as messages]
+   [metabase.events :as events]
    [metabase.integrations.common :as integrations.common]
    [metabase.models.user :refer [User]]
    [metabase.public-settings :as public-settings]
@@ -13,6 +15,7 @@
    [metabase.util.malli.schema :as ms]
    [toucan2.core :as t2])
   (:import
+   (clojure.lang ExceptionInfo)
    (java.net URI)))
 
 (set! *warn-on-reflection* true)
@@ -27,16 +30,46 @@
    [:sso_source       [:enum :saml :jwt]]
    [:login_attributes [:maybe :map]]])
 
+(defn- maybe-throw-user-provisioning
+  [user-provisioning-type]
+  (when (not user-provisioning-type)
+    (throw (ex-info (trs "Sorry, but you''ll need a {0} account to view this page. Please contact your administrator."
+                         (u/slugify (public-settings/site-name))) {}))))
+
+(defmulti check-user-provisioning
+  "If `user-provisioning-enabled?` is false, then we should throw an error when attempting to create a new user."
+  {:arglists '([model])}
+  keyword)
+
+(defmethod check-user-provisioning :saml
+  [_]
+  (maybe-throw-user-provisioning (sso-settings/saml-user-provisioning-enabled?)))
+
+(defmethod check-user-provisioning :ldap
+  [_]
+  (maybe-throw-user-provisioning (sso-settings/ldap-user-provisioning-enabled?)))
+
+(defmethod check-user-provisioning :jwt
+  [_]
+  (maybe-throw-user-provisioning (sso-settings/jwt-user-provisioning-enabled?)))
+
 (mu/defn create-new-sso-user!
   "This function is basically the same thing as the `create-new-google-auth-user` from `metabase.models.user`. We need
   to refactor the `core_user` table structure and the function used to populate it so that the enterprise product can
-  reuse it"
+  reuse it."
   [user :- UserAttributes]
-  (u/prog1 (first (t2/insert-returning-instances! User (merge user {:password (str (random-uuid))})))
-    (log/info (trs "New SSO user created: {0} ({1})" (:common_name <>) (:email <>)))
-    ;; send an email to everyone including the site admin if that's set
-    (when (integrations.common/send-new-sso-user-admin-email?)
-      (messages/send-user-joined-admin-notification-email! <>, :google-auth? true))))
+  (try
+    (u/prog1 (first (t2/insert-returning-instances! User (merge user {:password (str (random-uuid))})))
+      (log/info (trs "New SSO user created: {0} ({1})" (:common_name <>) (:email <>)))
+      ;; publish user-invited event for audit logging
+      (events/publish-event! :event/user-invited {:object (assoc <> :sso_source (:sso_source user))})
+      ;; send an email to everyone including the site admin if that's set
+      (when (integrations.common/send-new-sso-user-admin-email?)
+        (messages/send-user-joined-admin-notification-email! <>, :google-auth? true)))
+    (catch ExceptionInfo e
+      (log/error e "Error creating new SSO user")
+      (throw (ex-info (trs "Error creating new SSO user")
+                      {:user user})))))
 
 (defn fetch-and-update-login-attributes!
   "Update `:first_name`, `:last_name`, and `:login_attributes` for the user at `email`.

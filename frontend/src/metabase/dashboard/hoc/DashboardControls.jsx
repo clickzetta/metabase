@@ -15,7 +15,7 @@ const TICK_PERIOD = 1; // seconds
  *
  * @deprecated HOCs are deprecated
  */
-export default ComposedComponent =>
+export const DashboardControls = ComposedComponent =>
   connect(null, { replace })(
     class extends Component {
       static displayName =
@@ -42,8 +42,12 @@ export default ComposedComponent =>
         this.loadDashboardParams();
       }
 
-      componentDidUpdate() {
-        this.updateDashboardParams();
+      componentDidUpdate(prevProps) {
+        if (prevProps.location !== this.props.location) {
+          this.syncUrlHashToState();
+        } else {
+          this.syncStateToUrlHash();
+        }
         this._showNav(!this.state.isFullscreen);
       }
 
@@ -72,7 +76,16 @@ export default ComposedComponent =>
         this.setHideParameters(options.hide_parameters);
       };
 
-      updateDashboardParams = () => {
+      syncUrlHashToState() {
+        const { location } = this.props;
+
+        const { refresh, fullscreen, theme } = parseHashOptions(location.hash);
+        this.setRefreshPeriod(refresh);
+        this.setFullscreen(fullscreen);
+        this.setTheme(theme);
+      }
+
+      syncStateToUrlHash = () => {
         const { location, replace } = this.props;
 
         const options = parseHashOptions(location.hash);
@@ -168,11 +181,11 @@ export default ComposedComponent =>
         const { refreshPeriod } = this.state;
         if (refreshPeriod && this._refreshElapsed >= refreshPeriod) {
           this._refreshElapsed = 0;
-          await this.props.fetchDashboard(
-            this.props.dashboardId,
-            this.props.location.query,
-            { preserveParameters: true },
-          );
+          await this.props.fetchDashboard({
+            dashId: this.props.dashboardId,
+            queryParams: this.props.location.query,
+            options: { preserveParameters: true },
+          });
           this.props.fetchDashboardCardData({
             isRefreshing: true,
             reload: true,
@@ -224,7 +237,6 @@ export default ComposedComponent =>
             hasNightModeToggle={this.state.theme !== "transparent"}
             setRefreshElapsedHook={this.setRefreshElapsedHook}
             loadDashboardParams={this.loadDashboardParams}
-            updateDashboardParams={this.updateDashboardParams}
             onNightModeChange={this.setNightMode}
             onFullscreenChange={this.setFullscreen}
             onRefreshPeriodChange={this.setRefreshPeriod}

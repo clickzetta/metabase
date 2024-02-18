@@ -4,7 +4,6 @@
    [clojure.string :as str]
    [java-time.api :as t]
    [medley.core :as m]
-   [metabase.lib.schema.parameter :as lib.schema.parameter]
    [metabase.mbql.schema :as mbql.s]
    [metabase.mbql.util :as mbql.u]
    [metabase.models.params :as params]
@@ -18,10 +17,16 @@
 
 (set! *warn-on-reflection* true)
 
+(def ^:private temporal-units-regex #"(millisecond|second|minute|hour|day|week|month|quarter|year)")
+
+(def date-exclude-regex
+  "Regex to match date exclusion values, e.g. exclude-days-Mon, exclude-months-Jan, etc."
+  (re-pattern (str "exclude-" temporal-units-regex #"s-([-\p{Alnum}]+)")))
+
 (mu/defn date-type?
   "Is param type `:date` or some subtype like `:date/month-year`?"
   [param-type :- :keyword]
-  (= (get-in lib.schema.parameter/types [param-type :type]) :date))
+  (= (get-in mbql.s/parameter-types [param-type :type]) :date))
 
 (defn not-single-date-type?
   "Does date `param-type` represent a range of dates, rather than a single absolute date? (The value may be relative,
@@ -29,6 +34,15 @@
   [param-type]
   (and (date-type? param-type)
        (not (#{:date/single :date} param-type))))
+
+(defn exclusion-date-type
+  "When date `param-type` represent an exclusion of dates returns the temporal unit that's excluded."
+  [param-type value]
+  (when (and (date-type? param-type)
+             (string? value))
+    (some->> (re-matches date-exclude-regex value)
+             second
+             keyword)))
 
 ;; Both in MBQL and SQL parameter substitution a field value is compared to a date range, either relative or absolute.
 ;; Currently the field value is casted to a day (ignoring the time of day), so the ranges should have the same
@@ -148,7 +162,6 @@
 ;; 2) Range decoder which takes the parser output and produces a date range relative to the given datetime
 ;; 3) Filter decoder which takes the parser output and produces a mbql clause for a given mbql field reference
 
-(def ^:private temporal-units-regex #"(millisecond|second|minute|hour|day|week|month|quarter|year)")
 (def ^:private relative-suffix-regex (re-pattern (format "(|~|-from-([0-9]+)%ss)" temporal-units-regex)))
 
 (defn- include-current?
@@ -288,10 +301,6 @@
    :day     :day-of-week
    :month   :month-of-year
    :quarter :quarter-of-year})
-
-(def date-exclude-regex
-  "Regex to match date exclusion values, e.g. exclude-days-Mon, exclude-months-Jan, etc."
-  (re-pattern (str "exclude-" temporal-units-regex #"s-([-\p{Alnum}]+)")))
 
 (defn- absolute-date->unit
   [date-string]

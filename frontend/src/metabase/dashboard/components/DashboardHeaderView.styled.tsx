@@ -11,16 +11,19 @@ import {
 } from "metabase/styled-components/theme";
 import EditableText from "metabase/core/components/EditableText";
 import { FullWidthContainer } from "metabase/styled-components/layout/FullWidthContainer";
+import { FixedWidthContainer } from "./Dashboard/Dashboard.styled";
+import { SIDEBAR_WIDTH } from "./Sidebar";
 
 interface TypeForItemsThatRespondToNavBarOpen {
   isNavBarOpen: boolean;
 }
 
-export const HeaderRow = styled(
-  FullWidthContainer,
+export const HeaderFixedWidthContainer = styled(
+  FixedWidthContainer,
 )<TypeForItemsThatRespondToNavBarOpen>`
   display: flex;
   align-items: center;
+  justify-items: apart;
 
   ${breakpointMaxMedium} {
     ${props =>
@@ -34,6 +37,27 @@ export const HeaderRow = styled(
   ${breakpointMaxSmall} {
     flex-direction: column;
     align-items: baseline;
+  }
+`;
+
+export const HeaderContainer = styled.div<{
+  isSidebarOpen: boolean;
+  isFixedWidth: boolean;
+}>`
+  ${props =>
+    props.isFixedWidth &&
+    props.isSidebarOpen &&
+    css`
+      margin-right: ${SIDEBAR_WIDTH}px;
+    `}
+
+  ${breakpointMaxMedium} {
+    margin-right: 0;
+  }
+`;
+
+export const HeaderRow = styled(FullWidthContainer)`
+  ${breakpointMaxSmall} {
     padding-left: 0;
     padding-right: 0;
   }
@@ -45,6 +69,8 @@ export const HeaderCaptionContainer = styled.div`
   display: flex;
   padding-right: 2rem;
   right: 0.25rem;
+  display: flex;
+  align-items: center;
 `;
 
 export const HeaderCaption = styled(EditableText)`
@@ -126,7 +152,6 @@ export const HeaderButtonsContainer = styled.div<TypeForItemsThatRespondToNavBar
   display: flex;
   align-items: center;
   color: ${color("text-dark")};
-  margin-right: -1rem;
 
   ${breakpointMinSmall} {
     margin-left: auto;

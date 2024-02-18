@@ -6,7 +6,7 @@ import { Form, FormProvider } from "metabase/forms";
 import FormSubmitButton from "metabase/core/components/FormSubmitButton";
 import FormErrorMessage from "metabase/core/components/FormErrorMessage";
 import MetabaseSettings from "metabase/lib/settings";
-import * as Errors from "metabase/core/utils/errors";
+import * as Errors from "metabase/lib/errors";
 import type { UserAttribute } from "metabase-types/api";
 import Alert from "metabase/core/components/Alert";
 import FormFooter from "metabase/core/components/FormFooter";
@@ -70,17 +70,31 @@ export const ImpersonationModalView = ({
     database.features.includes("connection-impersonation-requires-role") &&
     database.details["role"] == null;
 
+  // for redshift, we impersonate using users, not roles
+  const impersonationUsesUsers = database.engine === "redshift";
+
+  const modalTitle = impersonationUsesUsers
+    ? // eslint-disable-next-line no-literal-metabase-strings -- Metabase settings
+      t`Map a Metabase user attribute to database users`
+    : t`Map a user attribute to database roles`;
+
+  const modalMessage = impersonationUsesUsers
+    ? // eslint-disable-next-line no-literal-metabase-strings -- Metabase settings
+      t`When the person runs a query (including native queries), Metabase will impersonate the privileges of the database user you associate with the user attribute.`
+    : // eslint-disable-next-line no-literal-metabase-strings -- Metabase settings
+      t`When the person runs a query (including native queries), Metabase will impersonate the privileges of the database role you associate with the user attribute.`;
+
   return (
     <ImpersonationModalViewRoot>
-      <h2>{t`Map a user attribute to database roles`}</h2>
+      <h2>{modalTitle}</h2>
       <ImpersonationDescription>
-        {t`When the person runs a query (including native queries), Metabase will impersonate the privileges of the database role you associate with the user attribute.`}{" "}
+        {modalMessage}{" "}
         <ExternalLink
           className="link"
+          // eslint-disable-next-line no-unconditional-metabase-links-render -- Admin settings
           href={MetabaseSettings.docsUrl("permissions/data")}
         >{t`Learn More`}</ExternalLink>
       </ImpersonationDescription>
-
       {roleRequired ? (
         <>
           <Alert icon="warning" variant="warning">

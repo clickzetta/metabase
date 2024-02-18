@@ -78,9 +78,9 @@ class Database {
         set.has("inner-join") ||
         set.has("full-join")
       );
-    } else {
-      return set.has(feature);
     }
+
+    return set.has(feature);
   }
 
   supportsPivots() {
@@ -116,7 +116,7 @@ class Database {
   }
 
   newQuestion() {
-    return this.question().setDefaultQuery().setDefaultDisplay();
+    return this.question().setDefaultDisplay();
   }
 
   question(
@@ -150,7 +150,7 @@ class Database {
   }
 
   nativeQuery(native: Partial<NativeQuery>) {
-    return this.nativeQuestion(native).query();
+    return this.nativeQuestion(native).legacyQuery();
   }
 
   savedQuestionsDatabase() {

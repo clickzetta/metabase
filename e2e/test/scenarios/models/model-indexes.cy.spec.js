@@ -7,6 +7,7 @@ import {
 } from "e2e/support/helpers";
 
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
+import { createModelIndex } from "e2e/support/helpers/e2e-model-index-helper";
 
 const { PRODUCTS_ID, PEOPLE_ID } = SAMPLE_DATABASE;
 
@@ -27,7 +28,7 @@ describe("scenarios > model indexes", () => {
       {
         name: "Products Model",
         query: { "source-table": PRODUCTS_ID },
-        dataset: true,
+        type: "model",
       },
       { wrapId: true, idAlias: "modelId" },
     );
@@ -160,7 +161,7 @@ describe("scenarios > model indexes", () => {
       {
         name: "People Model",
         query: { "source-table": PEOPLE_ID },
-        dataset: true,
+        type: "model",
       },
       {
         wrapId: true,
@@ -244,33 +245,6 @@ function editTitleMetadata() {
   cy.findByTestId("TableInteractive-root").findByTextEnsureVisible("Title");
 
   openColumnOptions("Title");
-}
-
-function createModelIndex({ modelId, pkName, valueName }) {
-  // since field ids are non-deterministic, we need to get them from the api
-  cy.request("GET", `/api/table/card__${modelId}/query_metadata`).then(
-    ({ body }) => {
-      const pkRef = [
-        "field",
-        body.fields.find(f => f.name === pkName).id,
-        null,
-      ];
-      const valueRef = [
-        "field",
-        body.fields.find(f => f.name === valueName).id,
-        null,
-      ];
-
-      cy.request("POST", "/api/model-index", {
-        pk_ref: pkRef,
-        value_ref: valueRef,
-        model_id: modelId,
-      }).then(response => {
-        expect(response.body.state).to.equal("indexed");
-        expect(response.body.id).to.equal(1);
-      });
-    },
-  );
 }
 
 const expectCardQueries = num =>

@@ -3,7 +3,7 @@ import { getIn } from "icepick";
 import type { LocationDescriptor } from "history";
 
 import { useMount } from "react-use";
-import type { IconProps } from "metabase/core/components/Icon";
+import type { IconProps } from "metabase/ui";
 
 import { isJWT } from "metabase/lib/utils";
 
@@ -12,7 +12,7 @@ import { mergeSettings } from "metabase/visualizations/lib/settings";
 import {
   getDashcardResultsError,
   isDashcardLoading,
-  isVirtualDashCard,
+  isQuestionDashCard,
 } from "metabase/dashboard/utils";
 
 import { isActionCard } from "metabase/actions/utils";
@@ -23,13 +23,15 @@ import type {
   Card,
   CardId,
   Dashboard,
-  DashboardCard,
+  QuestionDashboardCard,
   DashCardId,
   ParameterId,
   ParameterValueOrArray,
   VisualizationSettings,
-  Dataset,
+  DashCardDataMap,
+  VirtualCard,
 } from "metabase-types/api";
+import type { StoreDashcard } from "metabase-types/store";
 
 import { DASHBOARD_SLOW_TIMEOUT } from "metabase/dashboard/constants";
 import type { Mode } from "metabase/visualizations/click-actions/Mode";
@@ -42,9 +44,9 @@ import type {
   NavigateToNewCardFromDashboardOpts,
   DashCardOnChangeCardAndRunHandler,
 } from "./types";
-import DashCardActionButtons from "./DashCardActionButtons";
-import DashCardVisualization from "./DashCardVisualization";
-import { DashCardRoot, DashboardCardActionsPanel } from "./DashCard.styled";
+import { DashCardActionsPanel } from "./DashCardActionsPanel/DashCardActionsPanel";
+import { DashCardVisualization } from "./DashCardVisualization";
+import { DashCardRoot } from "./DashCard.styled";
 
 function preventDragging(event: React.SyntheticEvent) {
   event.stopPropagation();
@@ -52,16 +54,16 @@ function preventDragging(event: React.SyntheticEvent) {
 
 export interface DashCardProps {
   dashboard: Dashboard;
-  dashcard: DashboardCard & { justAdded?: boolean };
+  dashcard: StoreDashcard;
   gridItemWidth: number;
   totalNumGridCols: number;
-  dashcardData: Record<DashCardId, Record<CardId, Dataset>>;
+  dashcardData: DashCardDataMap;
   slowCards: Record<CardId, boolean>;
   parameterValues: Record<ParameterId, ParameterValueOrArray>;
   metadata: Metadata;
   mode?: Mode;
 
-  clickBehaviorSidebarDashcard?: DashboardCard | null;
+  clickBehaviorSidebarDashcard?: QuestionDashboardCard | null;
 
   isEditing?: boolean;
   isEditingParameter?: boolean;
@@ -74,6 +76,7 @@ export interface DashCardProps {
   headerIcon?: IconProps;
 
   onAddSeries: () => void;
+  onReplaceCard: () => void;
   onRemove: () => void;
   markNewCardSeen: (dashcardId: DashCardId) => void;
   navigateToNewCardFromDashboard?: (
@@ -85,7 +88,7 @@ export interface DashCardProps {
   onChangeLocation: (location: LocationDescriptor) => void;
 }
 
-function DashCard({
+function DashCardInner({
   dashcard,
   dashcardData,
   dashboard,
@@ -105,6 +108,7 @@ function DashCard({
   clickBehaviorSidebarDashcard,
   headerIcon,
   onAddSeries,
+  onReplaceCard,
   onRemove,
   navigateToNewCardFromDashboard,
   markNewCardSeen,
@@ -129,11 +133,11 @@ function DashCard({
     }
   });
 
-  const mainCard: Card = useMemo(
+  const mainCard: Card | VirtualCard = useMemo(
     () => ({
       ...dashcard.card,
       visualization_settings: mergeSettings(
-        dashcard.card.visualization_settings,
+        dashcard?.card?.visualization_settings,
         dashcard.visualization_settings,
       ),
     }),
@@ -141,21 +145,30 @@ function DashCard({
   );
 
   const cards = useMemo(() => {
-    if (Array.isArray(dashcard.series)) {
+    if (isQuestionDashCard(dashcard) && Array.isArray(dashcard.series)) {
       return [mainCard, ...dashcard.series];
     }
     return [mainCard];
   }, [mainCard, dashcard]);
 
   const series = useMemo(() => {
-    return cards.map(card => ({
-      ...getIn(dashcardData, [dashcard.id, card.id]),
-      card: card,
-      isSlow: slowCards[card.id],
-      isUsuallyFast:
+    return cards.map(card => {
+      const isSlow = card.id ? slowCards[card.id] : false;
+      const isUsuallyFast =
         card.query_average_duration &&
-        card.query_average_duration < DASHBOARD_SLOW_TIMEOUT,
-    }));
+        card.query_average_duration < DASHBOARD_SLOW_TIMEOUT;
+
+      if (!card.id) {
+        return { card, isSlow, isUsuallyFast };
+      }
+
+      return {
+        ...getIn(dashcardData, [dashcard.id, card.id]),
+        card,
+        isSlow,
+        isUsuallyFast,
+      };
+    });
   }, [cards, dashcard.id, dashcardData, slowCards]);
 
   const isLoading = useMemo(
@@ -248,51 +261,6 @@ function DashCard({
     return handler;
   }, [dashcard, navigateToNewCardFromDashboard]);
 
-  const renderDashCardActions = useCallback(() => {
-    if (isEditingDashboardLayout) {
-      return (
-        <DashboardCardActionsPanel
-          onMouseDown={preventDragging}
-          data-testid="dashboardcard-actions-panel"
-        >
-          <DashCardActionButtons
-            series={series}
-            dashboard={dashboard}
-            dashcard={dashcard}
-            isLoading={isLoading}
-            isPreviewing={isPreviewingCard}
-            isVirtualDashCard={isVirtualDashCard(dashcard)}
-            hasError={hasError}
-            onAddSeries={onAddSeries}
-            onRemove={onRemove}
-            onUpdateVisualizationSettings={onUpdateVisualizationSettings}
-            onReplaceAllVisualizationSettings={
-              onReplaceAllVisualizationSettings
-            }
-            showClickBehaviorSidebar={handleShowClickBehaviorSidebar}
-            onPreviewToggle={handlePreviewToggle}
-          />
-        </DashboardCardActionsPanel>
-      );
-    }
-
-    return null;
-  }, [
-    dashcard,
-    dashboard,
-    series,
-    hasError,
-    isLoading,
-    isPreviewingCard,
-    isEditingDashboardLayout,
-    onAddSeries,
-    onRemove,
-    onReplaceAllVisualizationSettings,
-    onUpdateVisualizationSettings,
-    handlePreviewToggle,
-    handleShowClickBehaviorSidebar,
-  ]);
-
   return (
     <ErrorBoundary>
       <DashCardRoot
@@ -304,7 +272,27 @@ function DashCard({
         isUsuallySlow={isSlow === "usually-slow"}
         ref={cardRootRef}
       >
-        {renderDashCardActions()}
+        {isEditingDashboardLayout && (
+          <DashCardActionsPanel
+            onMouseDown={preventDragging}
+            onLeftEdge={dashcard.col === 0}
+            series={series}
+            dashboard={dashboard}
+            dashcard={dashcard}
+            isLoading={isLoading}
+            isPreviewing={isPreviewingCard}
+            hasError={hasError}
+            onAddSeries={onAddSeries}
+            onRemove={onRemove}
+            onReplaceCard={onReplaceCard}
+            onUpdateVisualizationSettings={onUpdateVisualizationSettings}
+            onReplaceAllVisualizationSettings={
+              onReplaceAllVisualizationSettings
+            }
+            showClickBehaviorSidebar={handleShowClickBehaviorSidebar}
+            onPreviewToggle={handlePreviewToggle}
+          />
+        )}
         <DashCardVisualization
           dashboard={dashboard}
           dashcard={dashcard}
@@ -319,7 +307,6 @@ function DashCard({
           headerIcon={headerIcon}
           expectedDuration={expectedDuration}
           error={error}
-          isAction={isAction}
           isEmbed={isEmbed}
           isXray={isXray}
           isEditing={isEditing}
@@ -343,7 +330,6 @@ function DashCard({
   );
 }
 
-// eslint-disable-next-line import/no-default-export -- deprecated usage
-export default Object.assign(DashCard, {
+export const DashCard = Object.assign(DashCardInner, {
   root: DashCardRoot,
 });

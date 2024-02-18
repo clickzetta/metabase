@@ -11,6 +11,7 @@ import {
   crudGroupMappingsWidget,
   checkGroupConsistencyAfterDeletingMappings,
 } from "./shared/group-mappings-widget";
+import { getUserProvisioningInput, getSuccessUi } from "./shared/helpers";
 
 describeEE("scenarios > admin > settings > SSO > SAML", () => {
   beforeEach(() => {
@@ -39,7 +40,7 @@ describeEE("scenarios > admin > settings > SSO > SAML", () => {
     setupSaml();
     cy.visit("/admin/settings/authentication/saml");
 
-    typeAndBlurUsingLabel("SAML Identity Provider URL", "https://other.test");
+    typeAndBlurUsingLabel(/SAML Identity Provider URL/, "https://other.test");
     cy.button("Save changes").click();
     cy.wait("@updateSamlSettings");
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
@@ -74,6 +75,17 @@ describeEE("scenarios > admin > settings > SSO > SAML", () => {
     cy.wait("@updateSettings");
 
     getSamlCard().findByText("Set up").should("exist");
+  });
+
+  it("should allow the user to enable/disable user provisioning", () => {
+    setupSaml();
+    cy.visit("/admin/settings/authentication/saml");
+
+    getUserProvisioningInput().click();
+    cy.button("Save changes").click();
+    cy.wait("@updateSamlSettings");
+
+    getSuccessUi().should("exist");
   });
 
   describe("Group Mappings Widget", () => {
@@ -116,7 +128,7 @@ const setupSaml = () => {
 
 const enterSamlSettings = () => {
   getSamlCertificate().then(certificate => {
-    typeAndBlurUsingLabel("SAML Identity Provider URL", "https://example.test");
-    typeAndBlurUsingLabel("SAML Identity Provider Certificate", certificate);
+    typeAndBlurUsingLabel(/SAML Identity Provider URL/, "https://example.test");
+    typeAndBlurUsingLabel(/SAML Identity Provider Certificate/, certificate);
   });
 };

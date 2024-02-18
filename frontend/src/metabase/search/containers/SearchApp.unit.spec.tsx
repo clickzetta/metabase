@@ -12,7 +12,7 @@ import {
   setupDatabasesEndpoints,
   setupSearchEndpoints,
   setupTableEndpoints,
-  setupUsersEndpoints,
+  setupUserRecipientsEndpoint,
 } from "__support__/server-mocks";
 import {
   createMockCollection,
@@ -24,7 +24,7 @@ import {
 import type { EnabledSearchModelType, SearchResult } from "metabase-types/api";
 
 import type { SearchFilters } from "metabase/search/types";
-import { checkNotNull } from "metabase/core/utils/types";
+import { checkNotNull } from "metabase/lib/types";
 
 // Mock PAGE_SIZE so we don't have to generate a ton of elements for the pagination test
 jest.mock("metabase/search/containers/constants", () => ({
@@ -39,6 +39,7 @@ const TYPE_FILTER_LABELS: Record<EnabledSearchModelType, string> = {
   table: "Table",
   card: "Question",
   action: "Action",
+  "indexed-entity": "Indexed record",
 };
 
 const TEST_ITEMS: Partial<SearchResult>[] = [
@@ -72,7 +73,7 @@ const setup = async ({
   setupDatabasesEndpoints([TEST_DATABASE]);
   setupSearchEndpoints(searchItems);
   setupTableEndpoints(TEST_TABLE);
-  setupUsersEndpoints(TEST_USER_LIST);
+  setupUserRecipientsEndpoint({ users: TEST_USER_LIST });
   setupCollectionByIdEndpoint({
     collections: [TEST_COLLECTION],
   });
@@ -163,7 +164,7 @@ describe("SearchApp", () => {
   describe("filtering search results with the sidebar", () => {
     it.each(TEST_SEARCH_RESULTS)(
       "should reload with filtered searches when type=$model is changed in the dropdown sidebar filter",
-      async ({ model, name }) => {
+      async ({ model }) => {
         const { history } = await setup({
           searchText: "Test",
         });

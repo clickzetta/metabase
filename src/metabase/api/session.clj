@@ -213,15 +213,15 @@
 ;; There's also no need to salt the token because it's already random <3
 
 (def ^:private forgot-password-throttlers
-  {:email      (throttle/make-throttler :email)
-   :ip-address (throttle/make-throttler :email, :attempts-threshold 50)})
+  {:email      (throttle/make-throttler :email :attempts-threshold 3 :attempt-ttl-ms 1000)
+   :ip-address (throttle/make-throttler :email :attempts-threshold 50)})
 
 (defn- forgot-password-impl
   [email]
   (future
     (when-let [{user-id      :id
                 sso-source   :sso_source
-                is-active?   :is_active}
+                is-active?   :is_active :as user}
                (t2/select-one [User :id :sso_source :is_active]
                               :%lower.email
                               (u/lower-case-en email))]
@@ -231,7 +231,9 @@
         (let [reset-token        (user/set-password-reset-token! user-id)
               password-reset-url (str (public-settings/site-url) "/auth/reset_password/" reset-token)]
           (log/info password-reset-url)
-          (messages/send-password-reset-email! email nil password-reset-url is-active?))))))
+          (messages/send-password-reset-email! email nil password-reset-url is-active?)))
+      (events/publish-event! :event/password-reset-initiated
+                             {:object (assoc user :token (t2/select-one-fn :reset_token :model/User :id user-id))}))))
 
 (api/defendpoint POST "/forgot_password"
   "Send a reset email when user has forgotten their password."
@@ -244,12 +246,12 @@
   (forgot-password-impl email)
   api/generic-204-no-content)
 
-
 (defsetting reset-token-ttl-hours
   (deferred-tru "Number of hours a password reset is considered valid.")
   :visibility :internal
   :type       :integer
-  :default    48)
+  :default    48
+  :audit      :getter)
 
 (defn reset-token-ttl-ms
   "number of milliseconds a password reset is considered valid."
@@ -278,20 +280,23 @@
   {token    ms/NonBlankString
    password ms/ValidPassword}
   (or (when-let [{user-id :id, :as user} (valid-reset-token->user token)]
-        (user/set-password! user-id password)
-        ;; if this is the first time the user has logged in it means that they're just accepted their Metabase invite.
-        ;; Send all the active admins an email :D
-        (when-not (:last_login user)
-          (messages/send-user-joined-admin-notification-email! (t2/select-one User :id user-id)))
-        ;; after a successful password update go ahead and offer the client a new session that they can use
-        (let [{session-uuid :id, :as session} (create-session! :password user (request.u/device-info request))
-              response                        {:success    true
-                                               :session_id (str session-uuid)}]
-          (mw.session/set-session-cookies request response session (t/zoned-date-time (t/zone-id "GMT")))))
+        (let [reset-token (t2/select-one-fn :reset_token :model/User :id user-id)]
+          (user/set-password! user-id password)
+          ;; if this is the first time the user has logged in it means that they're just accepted their Metabase invite.
+          ;; Otherwise, send audit log event that a user reset their password.
+          (if (:last_login user)
+            (events/publish-event! :event/password-reset-successful {:object (assoc user :token reset-token)})
+            ;; Send all the active admins an email :D
+            (messages/send-user-joined-admin-notification-email! (t2/select-one User :id user-id)))
+          ;; after a successful password update go ahead and offer the client a new session that they can use
+          (let [{session-uuid :id, :as session} (create-session! :password user (request.u/device-info request))
+                response                        {:success    true
+                                                 :session_id (str session-uuid)}]
+            (mw.session/set-session-cookies request response session (t/zoned-date-time (t/zone-id "GMT"))))))
       (api/throw-invalid-param-exception :password (tru "Invalid reset token"))))
 
 (api/defendpoint GET "/password_reset_token_valid"
-  "Check is a password reset token is valid and isn't expired."
+  "Check if a password reset token is valid and isn't expired."
   [token]
   {token ms/NonBlankString}
   {:valid (boolean (valid-reset-token->user token))})
@@ -352,14 +357,16 @@
    email    :string
    hash     :string}
   (check-hash pulse-id email hash (request.u/ip-address request))
-  (api/let-404 [pulse-channel (t2/select-one PulseChannel :pulse_id pulse-id :channel_type "email")]
-    (let [emails (get-in pulse-channel [:details :emails])]
-      (if (some #{email} emails)
-        (t2/update! PulseChannel (:id pulse-channel) (assoc-in pulse-channel [:details :emails] (remove #{email} emails)))
-        (throw (ex-info (tru "Email for pulse-id doesn't exist.")
-                        {:type        type
-                         :status-code 400}))))
-    {:status :success :title (:name (pulse/retrieve-notification pulse-id :archived false))}))
+  (t2/with-transaction [_conn]
+    (api/let-404 [pulse-channel (t2/select-one PulseChannel :pulse_id pulse-id :channel_type "email")]
+      (let [emails (get-in pulse-channel [:details :emails])]
+        (if (some #{email} emails)
+          (t2/update! PulseChannel (:id pulse-channel) (update-in pulse-channel [:details :emails] #(remove #{email} %)))
+          (throw (ex-info (tru "Email for pulse-id doesn't exist.")
+                          {:type        type
+                           :status-code 400}))))
+      (events/publish-event! :event/subscription-unsubscribe {:object {:email email}})
+      {:status :success :title (:name (pulse/retrieve-notification pulse-id :archived false))})))
 
 (api/defendpoint POST "/pulse/unsubscribe/undo"
   "Allow non-users to undo an unsubscribe from pulses/subscriptions, with the hash given through email."
@@ -368,14 +375,15 @@
    email    :string
    hash     :string}
   (check-hash pulse-id email hash (request.u/ip-address request))
-  (api/let-404 [pulse-channel (t2/select-one PulseChannel :pulse_id pulse-id :channel_type "email")]
-    (let [emails       (get-in pulse-channel [:details :emails])
-          given-email? #(= % email)]
-      (if (some given-email? emails)
-        (throw (ex-info (tru "Email for pulse-id already exists.")
-                        {:type        type
-                         :status-code 400}))
-        (t2/update! PulseChannel (:id pulse-channel) (update-in pulse-channel [:details :emails] conj email))))
-    {:status :success :title (:name (pulse/retrieve-notification pulse-id :archived false))}))
+  (t2/with-transaction [_conn]
+    (api/let-404 [pulse-channel (t2/select-one PulseChannel :pulse_id pulse-id :channel_type "email")]
+      (let [emails (get-in pulse-channel [:details :emails])]
+        (if (some #{email} emails)
+          (throw (ex-info (tru "Email for pulse-id already exists.")
+                          {:type        type
+                           :status-code 400}))
+          (t2/update! PulseChannel (:id pulse-channel) (update-in pulse-channel [:details :emails] conj email))))
+      (events/publish-event! :event/subscription-unsubscribe-undo {:object {:email email}})
+      {:status :success :title (:name (pulse/retrieve-notification pulse-id :archived false))})))
 
 (api/define-routes +log-all-request-failures)

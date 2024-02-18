@@ -3,10 +3,10 @@ import { t } from "ttag";
 import MetabaseSettings from "metabase/lib/settings";
 import { isSyncCompleted } from "metabase/lib/syncing";
 
-import { Icon } from "metabase/core/components/Icon";
+import { Icon } from "metabase/ui";
 import AccordionList from "metabase/core/components/AccordionList";
 import ExternalLink from "metabase/core/components/ExternalLink";
-import { isNotNull } from "metabase/core/utils/types";
+import { isNotNull } from "metabase/lib/types";
 import type Database from "metabase-lib/metadata/Database";
 import type Schema from "metabase-lib/metadata/Schema";
 import type Table from "metabase-lib/metadata/Table";
@@ -143,6 +143,7 @@ const LinkToDocsOnReferencingSavedQuestionsInQueries = () => (
   <LinkToDocsContainer>
     {t`Is a question missing?`}
     <ExternalLink
+      // eslint-disable-next-line no-unconditional-metabase-links-render -- It's hard to tell if this is still used in the app. Please see https://metaboat.slack.com/archives/C505ZNNH4/p1703243785315819
       href={MetabaseSettings.docsUrl(
         "questions/native-editor/referencing-saved-questions-in-queries",
       )}

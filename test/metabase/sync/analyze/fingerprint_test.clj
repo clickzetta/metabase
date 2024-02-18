@@ -28,24 +28,23 @@
   (is (= #{"type/ImageURL" "type/AvatarURL"}
          (#'fingerprint/base-types->descendants #{:type/ImageURL :type/AvatarURL}))))
 
-
-;; Make sure we generate the correct HoneySQL WHERE clause based on whatever is in
-;; `*fingerprint-version->types-that-should-be-re-fingerprinted*`
 (deftest ^:parallel honeysql-for-fields-that-need-fingerprint-updating-test
-  (is (= {:where
-          [:and
-           [:= :active true]
-           [:or
-            [:not (mdb.u/isa :semantic_type :type/PK)]
-            [:= :semantic_type nil]]
-           [:not-in :visibility_type ["retired" "sensitive"]]
-           [:not (mdb.u/isa :base_type :type/Structured)]
-           [:or
+  (testing (str "Make sure we generate the correct HoneySQL WHERE clause based on whatever is in "
+                "`*fingerprint-version->types-that-should-be-re-fingerprinted*`")
+    (is (= {:where
             [:and
-             [:< :fingerprint_version 1]
-             [:in :base_type #{"type/URL" "type/ImageURL" "type/AvatarURL"}]]]]}
-         (binding [i/*fingerprint-version->types-that-should-be-re-fingerprinted* {1 #{:type/URL}}]
-           (#'fingerprint/honeysql-for-fields-that-need-fingerprint-updating)))))
+             [:= :active true]
+             [:or
+              [:not (mdb.u/isa :semantic_type :type/PK)]
+              [:= :semantic_type nil]]
+             [:not-in :visibility_type ["retired" "sensitive"]]
+             [:not (mdb.u/isa :base_type :type/Structured)]
+             [:or
+              [:and
+               [:< :fingerprint_version 1]
+               [:in :base_type #{"type/URL" "type/ImageURL" "type/AvatarURL"}]]]]}
+           (binding [i/*fingerprint-version->types-that-should-be-re-fingerprinted* {1 #{:type/URL}}]
+             (#'fingerprint/honeysql-for-fields-that-need-fingerprint-updating))))))
 
 (deftest ^:parallel honeysql-for-fields-that-need-fingerprint-updating-test-2
   (is (= {:where
@@ -60,7 +59,7 @@
             [:and
              [:< :fingerprint_version 2]
              [:in :base_type #{"type/Decimal" "type/Latitude" "type/Longitude" "type/Coordinate" "type/Currency" "type/Float"
-                               "type/Share" "type/Income" "type/Price" "type/Discount" "type/GrossMargin" "type/Cost"}]]
+                               "type/Share" "type/Income" "type/Price" "type/Discount" "type/GrossMargin" "type/Cost" "type/Percentage"}]]
             [:and
              [:< :fingerprint_version 1]
              [:in :base_type #{"type/ImageURL" "type/AvatarURL"}]]]]}
@@ -82,7 +81,7 @@
               [:and
                [:< :fingerprint_version 2]
                [:in :base_type #{"type/Decimal" "type/Latitude" "type/Longitude" "type/Coordinate" "type/Currency" "type/Float"
-                                 "type/Share" "type/Income" "type/Price" "type/Discount" "type/GrossMargin" "type/Cost"}]]
+                                 "type/Share" "type/Income" "type/Price" "type/Discount" "type/GrossMargin" "type/Cost" "type/Percentage"}]]
               ;; no type/Float stuff should be included for 1
               [:and
                [:< :fingerprint_version 1]
@@ -105,7 +104,7 @@
               [:and
                [:< :fingerprint_version 4]
                [:in :base_type #{"type/Decimal" "type/Latitude" "type/Longitude" "type/Coordinate" "type/Currency" "type/Float"
-                                 "type/Share" "type/Income" "type/Price" "type/Discount" "type/GrossMargin" "type/Cost"}]]
+                                 "type/Share" "type/Income" "type/Price" "type/Discount" "type/GrossMargin" "type/Cost" "type/Percentage"}]]
               [:and
                [:< :fingerprint_version 3]
                [:in :base_type #{"type/URL" "type/ImageURL" "type/AvatarURL"}]]
@@ -137,7 +136,8 @@
 (defn- field-was-fingerprinted?! [fingerprint-versions field-properties]
   (let [fingerprinted? (atom false)]
     (binding [i/*fingerprint-version->types-that-should-be-re-fingerprinted* fingerprint-versions]
-      (with-redefs [qp/process-query              (fn [_ {:keys [rff]}]
+      (with-redefs [qp/process-query              (fn process-query
+                                                    [_query rff]
                                                     (transduce identity (rff :metadata) [[1] [2] [3] [4] [5]]))
                     fingerprint/save-fingerprint! (fn [& _] (reset! fingerprinted? true))]
         (t2.with-temp/with-temp [Table table {}
@@ -246,7 +246,6 @@
               {1 #{:type/Text}}
               {:base_type :type/Text, :fingerprint_version 1}))))))
 
-
 (deftest fingerprint-table!-test
   (testing "the `fingerprint!` function is correctly updating the correct columns of Field"
     (t2.with-temp/with-temp [Field field {:base_type           :type/Integer
@@ -255,7 +254,7 @@
                                           :fingerprint_version 1
                                           :last_analyzed       #t "2017-08-09T00:00:00"}]
       (binding [i/*latest-fingerprint-version* 3]
-        (with-redefs [qp/process-query             (fn [_ {:keys [rff]}]
+        (with-redefs [qp/process-query             (fn [_query rff]
                                                      (transduce identity (rff :metadata) [[1] [2] [3] [4] [5]]))
                       fingerprinters/fingerprinter (constantly (fingerprinters/constant-fingerprinter {:experimental {:fake-fingerprint? true}}))]
           (is (= {:no-data-fingerprints 0, :failed-fingerprints    0,
@@ -280,10 +279,11 @@
         (is (= (fingerprint/empty-stats-map 0)
                (fingerprint/fingerprint-fields-for-db! fake-db [(t2/select-one Table :id (data/id :venues))] (fn [_ _]))))))))
 
-(deftest ^:parallel fingerprint-test
+(deftest fingerprint-test
   (mt/test-drivers (mt/normal-drivers)
     (testing "Fingerprints should actually get saved with the correct values"
       (testing "Text fingerprints"
+        (fingerprint/fingerprint-fields! (t2/select-one Table :id (data/id :venues)))
         (is (=? {:global {:distinct-count 100
                           :nil%           0.0}
                  :type   {:type/Text {:percent-json   0.0
@@ -299,9 +299,11 @@
       (let [table (t2/select-one Table :id (mt/id :categories))
             field (t2/select-one Field :id (mt/id :categories :name))]
         (binding [fingerprint/*truncation-size* size]
-          (#'fingerprint/fingerprint-table! table [field])
+          (is (=? {:updated-fingerprints 1}
+                  (#'fingerprint/fingerprint-table! table [field])))
           (let [field' (t2/select-one [Field :fingerprint] :id (u/id field))
                 fingerprinted-size (get-in field' [:fingerprint :type :type/Text :average-length])]
+            (is fingerprinted-size)
             (is (<= fingerprinted-size size))))))))
 
 (deftest refingerprint-fields-for-db!-test

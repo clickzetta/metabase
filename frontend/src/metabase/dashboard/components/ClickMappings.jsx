@@ -5,22 +5,27 @@ import _ from "underscore";
 import { t } from "ttag";
 import { getIn, assocIn, dissocIn } from "icepick";
 
-import { Icon } from "metabase/core/components/Icon";
+import { Icon } from "metabase/ui";
 import Select from "metabase/core/components/Select";
 
+import * as Lib from "metabase-lib";
 import MetabaseSettings from "metabase/lib/settings";
 import { isPivotGroupColumn } from "metabase/lib/data_grid";
 import { GTAPApi } from "metabase/services";
 
-import { loadMetadataForQuery } from "metabase/redux/metadata";
+import { loadMetadataForDependentItems } from "metabase/redux/metadata";
 import { getParameters } from "metabase/dashboard/selectors";
-import { getTargetsWithSourceFilters } from "metabase-lib/parameters/utils/click-behavior";
+import { getMetadata } from "metabase/selectors/metadata";
+import {
+  getTargetsForDashboard,
+  getTargetsForQuestion,
+} from "metabase-lib/parameters/utils/click-behavior";
 import Question from "metabase-lib/Question";
 import { TargetTrigger } from "./ClickMappings.styled";
 
-class ClickMappingsInner extends Component {
+class ClickMappings extends Component {
   render() {
-    const { setTargets, unsetTargets } = this.props;
+    const { setTargets, unsetTargets, question } = this.props;
     const sourceOptions = {
       ...this.props.sourceOptions,
       userAttribute: this.props.userAttributes,
@@ -32,7 +37,11 @@ class ClickMappingsInner extends Component {
         sourceOptions: _.chain(sourceOptions)
           .mapObject((sources, sourceType) =>
             sources
-              .filter(target.sourceFilters[sourceType])
+              .filter(source => {
+                const sourceFilter = target.sourceFilters[sourceType];
+
+                return sourceFilter(source, question);
+              })
               .map(getSourceOption[sourceType]),
           )
           .pairs()
@@ -49,7 +58,7 @@ class ClickMappingsInner extends Component {
       );
     }
     return (
-      <div>
+      <div data-testid="click-mappings">
         <div>
           {setTargets.map(target => {
             return (
@@ -113,14 +122,16 @@ class ClickMappingsInner extends Component {
   }
 }
 
-const ClickMappings = _.compose(
+export const ClickMappingsConnected = _.compose(
   loadQuestionMetadata((state, props) =>
-    props.isDash || props.isAction ? null : props.object,
+    props.isDashboard ? null : props.object,
   ),
   withUserAttributes,
   connect((state, props) => {
-    const { object, isDash, dashcard, clickBehavior } = props;
+    const { object, isDashboard, dashcard, clickBehavior } = props;
     let parameters = getParameters(state, props);
+    const metadata = getMetadata(state);
+    const question = new Question(dashcard.card, metadata);
 
     if (props.excludeParametersSources) {
       // Remove parameters as possible sources.
@@ -136,12 +147,9 @@ const ClickMappings = _.compose(
     }
 
     const [setTargets, unsetTargets] = _.partition(
-      getTargetsWithSourceFilters({
-        isAction: props.isAction,
-        isDash,
-        dashcard,
-        object,
-      }),
+      isDashboard
+        ? getTargetsForDashboard(object, dashcard)
+        : getTargetsForQuestion(object),
       ({ id }) =>
         getIn(clickBehavior, ["parameterMapping", id, "source"]) != null,
     );
@@ -149,9 +157,9 @@ const ClickMappings = _.compose(
       column: dashcard.card.result_metadata?.filter(isMappableColumn) || [],
       parameter: parameters,
     };
-    return { setTargets, unsetTargets, sourceOptions };
+    return { setTargets, unsetTargets, sourceOptions, question };
   }),
-)(ClickMappingsInner);
+)(ClickMappings);
 
 const getKeyForSource = o => (o.type == null ? null : `${o.type}-${o.id}`);
 const getSourceOption = {
@@ -284,9 +292,10 @@ function loadQuestionMetadata(getQuestion) {
       }
 
       fetch() {
-        const { question, loadMetadataForQuery } = this.props;
+        const { question, loadMetadataForDependentItems } = this.props;
         if (question) {
-          loadMetadataForQuery(question.query());
+          const dependentItems = Lib.dependentMetadata(question.query());
+          loadMetadataForDependentItems(dependentItems);
         }
       }
 
@@ -300,7 +309,7 @@ function loadQuestionMetadata(getQuestion) {
       (state, props) => ({
         question: getQuestion && getQuestion(state, props),
       }),
-      { loadMetadataForQuery },
+      { loadMetadataForDependentItems },
     )(MetadataLoader);
   };
 }
@@ -333,11 +342,10 @@ export function isMappableColumn(column) {
 export function clickTargetObjectType(object) {
   if (!(object instanceof Question)) {
     return "dashboard";
-  } else if (object.isNative()) {
-    return "native";
-  } else {
-    return "gui";
   }
-}
 
-export default ClickMappings;
+  const query = object.query();
+  const { isNative } = Lib.queryDisplayInfo(query);
+
+  return isNative ? "native" : "gui";
+}

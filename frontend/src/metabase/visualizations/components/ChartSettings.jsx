@@ -102,7 +102,10 @@ class ChartSettings extends Component {
   }
 
   handleShowSection = section => {
-    this.setState({ currentSection: section, currentWidget: null });
+    this.setState({
+      currentSection: section,
+      currentWidget: null,
+    });
   };
 
   // allows a widget to temporarily replace itself with a different widget
@@ -435,19 +438,11 @@ const ChartSettingsFooter = ({ onDone, onCancel, onReset }) => (
       <Button
         borderless
         icon="refresh"
-        data-metabase-event="Chart Settings;Reset"
         onClick={onReset}
       >{t`Reset to defaults`}</Button>
     )}
-    <Button
-      onClick={onCancel}
-      data-metabase-event="Chart Settings;Cancel"
-    >{t`Cancel`}</Button>
-    <Button
-      primary
-      onClick={onDone}
-      data-metabase-event="Chart Settings;Done"
-    >{t`Done`}</Button>
+    <Button onClick={onCancel}>{t`Cancel`}</Button>
+    <Button primary onClick={onDone}>{t`Done`}</Button>
   </ChartSettingsFooterRoot>
 );
 

@@ -7,7 +7,7 @@ import { getUserIsAdmin, getUser } from "metabase/selectors/user";
 import { hasActiveUploads } from "metabase/redux/uploads";
 
 import DatabaseStatus from "../../containers/DatabaseStatus";
-import FileUploadStatus from "../FileUploadStatus";
+import { FileUploadStatus } from "../FileUploadStatus";
 import { StatusListingRoot } from "./StatusListing.styled";
 
 const StatusListing = () => {
@@ -26,7 +26,7 @@ const StatusListing = () => {
   }
 
   return (
-    <StatusListingRoot>
+    <StatusListingRoot data-testid="status-root-container">
       {isAdmin && <DatabaseStatus />}
       <FileUploadStatus />
     </StatusListingRoot>

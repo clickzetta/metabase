@@ -20,11 +20,11 @@ To learn more, see [Exploring data with Metabase's data browser](https://www.met
 
 ## Exploring collections
 
-[Collections][collections] in Metabase are a lot like folders. They're where all your team's dashboards and charts are kept. To explore a collection, just click on one in the **Our analytics** section of the home page, or click on `Browse all items` to see everything.
+[Collections][collections] in Metabase are a lot like folders. They're where Metabase keeps all your team's dashboards and charts.
 
 ![A collection](./images/collection-detail.png)
 
-If your teammates are cool, they'll have pinned some important dashboards or questions within your collections; if so, those important or useful items will show up in a different color at the top of a collection. Any dashboards that are pinned in the top-level, **Our Analytics** collection will also show up on the Metabase homepage.
+If your teammates are cool, they'll have pinned some important dashboards or questions within your collections; if so, those pinned items will show up as cards at the top of the collection.
 
 Collections have a list of any other items that are saved within them, and you can see what other collections are saved inside of the current one by checking out the navigation sidebar.
 
@@ -36,15 +36,17 @@ You can use Models to create derived tables on the fly. See [Models][models].
 
 [Dashboards][dashboards] are a set of questions and text cards that you want to be able to refer to regularly.
 
-If you click on a part of a chart, such as a bar in a bar chart, or a dot on a line chart, you'll see a the **Action menu**, with actions you can take to dive deeper into that result, branch off from it in a different direction, or create an [X-ray](x-rays.md) to see an automatic exploration of the data.
+If you click on a part of a chart, such as a bar in a bar chart, or a dot on a line chart, you'll see a the **Action menu**, with actions you can take to dive deeper into that result, branch off from it in a different direction, or see automatic insights to [X-ray](x-rays.md) the data.
 
-![Drill through](images/drill-through.png)
+![Drill-through menu](images/automatic-insights.png)
 
-In this example of orders by product category over time, clicking on a dot on this line chart gives us the ability to:
+In this example of orders by product category per month, clicking on a dot on this line chart gives us the ability to:
 
-- **Zoom in**: See orders for a particular category over a shorter time range.
 - **See these Orders**: See a list of the orders for a particular month
-- **Break out by a category**: See things like the Gizmo orders in June 2017 broken out by the status of the customer (e.g., `new` or `VIP`). Different charts will have different breakout options, such as **Location** and **Time**.
+- **See this month by week**.
+- **Break out by ...**: See things like the Gizmo orders in June 2023 broken out by the status of the customer (e.g., `new` or `VIP`). Different charts will have different breakout options, such as **Location** and **Time**.
+- **Automatic insights**: See orders for a particular category over a shorter time range.
+- **Filter by this value**: update the chart based on the value you clicked: equal to, less than, greater than, or not equal to.
 
 > Note that while charts created with SQL don't currently have the drill-through menu, you can add SQL questions to a dashboard and customize their click behavior. You can send people to a [custom destination](https://www.metabase.com/learn/building-analytics/dashboards/custom-destinations.html) (like another dashboard or an external URL), or have the clicked value [update a dashboard filter](https://www.metabase.com/learn/building-analytics/dashboards/cross-filtering.html).
 
@@ -70,7 +72,7 @@ One of our personal favorite ways to explore is with the **Distribution** option
 
 ## Search
 
-Use the search bar to find dashboards, questions, collections, and pulses. You can select from the typeahead's dropdown results, or hit enter to view a search results page. You can also activate the search bar from anywhere by pressing the `/` key.
+Use the search bar to find dashboards, questions, collections, subscriptions, and alerts. You can select from the typeahead's dropdown results, or hit enter to view a search results page. You can also activate the search bar from anywhere by pressing the `/` key.
 
 Searches take into account items’ titles, descriptions, and other metadata — you can even search the contents of your SQL queries. For example, you can search for things like `SELECT escape_pod FROM mothership` and find that one question you worked on six months ago. The results will display which collection each item is saved in, what kind of object it is, and whether it’s pinned. Note that you'll only ever see items in collections you have permission to view.
 

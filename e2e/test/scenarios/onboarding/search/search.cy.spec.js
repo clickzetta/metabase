@@ -3,7 +3,7 @@ import {
   describeEE,
   describeWithSnowplow,
   enableTracking,
-  expectGoodSnowplowEvents,
+  expectGoodSnowplowEvent,
   expectNoBadSnowplowEvents,
   modal,
   popover,
@@ -12,15 +12,19 @@ import {
   setActionsEnabledForDB,
   setTokenFeatures,
   summarize,
+  assertIsEllipsified,
+  main,
 } from "e2e/support/helpers";
 import {
   ADMIN_USER_ID,
   NORMAL_USER_ID,
   ORDERS_COUNT_QUESTION_ID,
   ORDERS_QUESTION_ID,
+  ORDERS_DASHBOARD_ID,
 } from "e2e/support/cypress_sample_instance_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
+import { createModelIndex } from "e2e/support/helpers/e2e-model-index-helper";
 
 const typeFilters = [
   {
@@ -51,9 +55,13 @@ const typeFilters = [
     label: "Action",
     type: "action",
   },
+  {
+    label: "Indexed record",
+    type: "indexed-entity",
+  },
 ];
 
-const { ORDERS_ID } = SAMPLE_DATABASE;
+const { ORDERS_ID, PRODUCTS_ID } = SAMPLE_DATABASE;
 
 const NORMAL_USER_TEST_QUESTION = {
   name: `Robert's Super Duper Reviews`,
@@ -96,7 +104,19 @@ describe("scenarios > search", () => {
   describe("universal search", () => {
     it("should work for admin (metabase#20018)", () => {
       cy.visit("/");
-      getSearchBar().as("searchBox").type("product").blur();
+      getSearchBar().as("searchBox").clear().type("orders count").blur();
+
+      expectSearchResultContent({
+        expectedSearchResults: [
+          {
+            name: /Orders, Count, Grouped by/i,
+            icon: "line",
+          },
+        ],
+        strict: false,
+      });
+
+      getSearchBar().clear().type("product").blur();
 
       cy.wait("@search");
 
@@ -169,6 +189,105 @@ describe("scenarios > search", () => {
 
       cy.get("@search.all").should("have.length", 1);
     });
+
+    it("should render a preview of markdown descriptions", () => {
+      cy.createQuestion({
+        name: "Description Test",
+        query: { "source-table": ORDERS_ID },
+        description: `![alt](https://upload.wikimedia.org/wikipedia/commons/a/a2/Cat_outside.jpg)
+
+        Lorem ipsum dolor sit amet.
+
+        ----
+
+        ## Heading 1
+
+        This is a [link](https://upload.wikimedia.org/wikipedia/commons/a/a2/Cat_outside.jpg).
+
+        Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. `,
+      }).then(() => {
+        cy.signInAsNormalUser();
+        cy.visit("/");
+        getSearchBar().type("Test");
+      });
+
+      //Enseure that text is ellipsified
+      cy.findByTestId("result-description")
+        .findByText(/Lorem ipsum dolor sit amet./)
+        .then(el => assertIsEllipsified(el[0]));
+
+      //Ensure that images are not being rendered in the descriptions
+      cy.findByTestId("result-description")
+        .findByRole("img")
+        .should("not.exist");
+    });
+
+    it("should not overflow container if results contain descriptions with large unborken strings", () => {
+      cy.createQuestion({
+        name: "Description Test",
+        query: { "source-table": ORDERS_ID },
+        description: `testingtestingtestingtestingtestingtestingtestingtesting testingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtesting testingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtestingtesting`,
+      }).then(() => {
+        cy.signInAsNormalUser();
+        cy.visit("/");
+        getSearchBar().type("Test");
+      });
+
+      const resultDescription = cy.findByTestId("result-description");
+      const parentContainer = cy.findByTestId(
+        "search-results-floating-container",
+      );
+
+      parentContainer.invoke("outerWidth").then(parentWidth => {
+        resultDescription
+          .invoke("outerWidth")
+          .should(
+            "be.lessThan",
+            parentWidth,
+            "Result description width should not exceed parent container width",
+          );
+      });
+    });
+
+    it("should not dismiss when a dashboard finishes loading (metabase#35009)", () => {
+      cy.visit(`/dashboard/${ORDERS_DASHBOARD_ID}`);
+
+      // Type as soon as possible, before the dashboard has finished loading
+      getSearchBar().type("ord");
+
+      // Once the dashboard is visible, the search results should not be dismissed
+      main().findByRole("heading", { name: "Loading..." }).should("not.exist");
+      cy.findByTestId("search-results-floating-container").should("exist");
+    });
+
+    it("should not dismiss when the homepage redirects to a dashboard (metabase#34226)", () => {
+      cy.request("PUT", "/api/setting/custom-homepage", { value: true });
+      cy.request("PUT", "/api/setting/custom-homepage-dashboard", {
+        value: ORDERS_DASHBOARD_ID,
+      });
+      cy.intercept(
+        {
+          url: `/api/dashboard/${ORDERS_DASHBOARD_ID}`,
+          method: "GET",
+          middleware: true,
+        },
+        req => {
+          req.continue(res => {
+            res.delay = 1000;
+            res.send();
+          });
+        },
+      );
+      cy.visit(`/`);
+
+      // Type as soon as possible, before the dashboard has finished loading
+      getSearchBar().type("ord");
+
+      // Once the dashboard is visible, the search results should not be dismissed
+      cy.findByTestId("dashboard-parameters-and-cards").should("exist");
+
+      cy.findByTestId("search-results-floating-container").should("exist");
+    });
   });
   describe("accessing full page search with `Enter`", () => {
     it("should not render full page search if user has not entered a text query", () => {
@@ -222,7 +341,7 @@ describe("scenarios > search", () => {
         cy.createQuestion({
           name: "Orders Model",
           query: { "source-table": ORDERS_ID },
-          dataset: true,
+          type: "model",
         }).then(({ body: { id } }) => {
           createAction({
             name: "Update orders quantity",
@@ -241,6 +360,23 @@ describe("scenarios > search", () => {
             visualization_settings: {
               type: "button",
             },
+          });
+        });
+
+        cy.createQuestion(
+          {
+            name: "Products Model",
+            query: { "source-table": PRODUCTS_ID },
+            type: "model",
+          },
+          { wrapId: true, idAlias: "modelId" },
+        );
+
+        cy.get("@modelId").then(modelId => {
+          createModelIndex({
+            modelId,
+            pkName: "ID",
+            valueName: "TITLE",
           });
         });
       });
@@ -390,6 +526,7 @@ describe("scenarios > search", () => {
           ],
         });
       });
+
       it("should filter results by more than one user", () => {
         cy.visit("/");
 
@@ -489,6 +626,45 @@ describe("scenarios > search", () => {
             ADMIN_TEST_QUESTION.name,
             REVIEWS_TABLE_NAME,
           ],
+        });
+      });
+
+      ["normal", "sandboxed"].forEach(userType => {
+        it(`should allow ${userType} (non-admin) user to see users and filter by created_by`, () => {
+          cy.signIn(userType);
+          cy.visit("/");
+
+          getSearchBar().clear();
+          getSearchBar().type("reviews{enter}");
+          cy.wait("@search");
+
+          expectSearchResultItemNameContent(
+            {
+              itemNames: [
+                NORMAL_USER_TEST_QUESTION.name,
+                ADMIN_TEST_QUESTION.name,
+              ],
+            },
+            { strict: false },
+          );
+
+          cy.findByTestId("created_by-search-filter").click();
+
+          popover().within(() => {
+            cy.findByText("Bobby Tables").click();
+            cy.findByText("Apply").click();
+          });
+          cy.url().should("contain", "created_by");
+
+          expectSearchResultContent({
+            expectedSearchResults: [
+              {
+                name: ADMIN_TEST_QUESTION.name,
+                timestamp: "Created a few seconds ago by Bobby Tables",
+                collection: "Our analytics",
+              },
+            ],
+          });
         });
       });
     });
@@ -694,6 +870,45 @@ describe("scenarios > search", () => {
             LAST_EDITED_BY_ADMIN_QUESTION.name,
             REVIEWS_TABLE_NAME,
           ],
+        });
+      });
+
+      ["normal", "sandboxed"].forEach(userType => {
+        it(`should allow ${userType} (non-admin) user to see users and filter by last_edited_by`, () => {
+          cy.signIn(userType);
+          cy.visit("/");
+
+          getSearchBar().clear();
+          getSearchBar().type("reviews{enter}");
+          cy.wait("@search");
+
+          expectSearchResultItemNameContent(
+            {
+              itemNames: [
+                NORMAL_USER_TEST_QUESTION.name,
+                ADMIN_TEST_QUESTION.name,
+              ],
+            },
+            { strict: false },
+          );
+
+          cy.findByTestId("last_edited_by-search-filter").click();
+
+          popover().within(() => {
+            cy.findByText("Bobby Tables").click();
+            cy.findByText("Apply").click();
+          });
+          cy.url().should("contain", "last_edited_by");
+
+          expectSearchResultContent({
+            expectedSearchResults: [
+              {
+                name: LAST_EDITED_BY_ADMIN_QUESTION.name,
+                timestamp: "Updated a few seconds ago by Bobby Tables",
+                collection: "Our analytics",
+              },
+            ],
+          });
         });
       });
     });
@@ -1075,7 +1290,8 @@ describe("scenarios > search", () => {
 });
 
 describeWithSnowplow("scenarios > search", () => {
-  const PAGE_VIEW_EVENT = 1;
+  const SEARCH_RESULTS_FILTERED_NAME = "search_results_filtered";
+  const NEW_SEARCH_QUERY_EVENT_NAME = "new_search_query";
 
   beforeEach(() => {
     restore();
@@ -1090,9 +1306,286 @@ describeWithSnowplow("scenarios > search", () => {
 
   it("should send snowplow events for global search queries", () => {
     cy.visit("/");
-    expectGoodSnowplowEvents(PAGE_VIEW_EVENT);
     getSearchBar().type("Orders").blur();
-    expectGoodSnowplowEvents(PAGE_VIEW_EVENT + 1); // new_search_query
+    expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+  });
+
+  describe("should send snowplow events for each filter when it is applied and removed", () => {
+    describe("no filters", () => {
+      it("should send a new_search_query snowplow event, but not search_results_filtered when a search with no filters is accessed from the URL", () => {
+        cy.visit("/search?q=orders");
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+      });
+    });
+
+    describe("type filter", () => {
+      it("should send a snowplow event when a search filter is used in the URL", () => {
+        cy.visit("/search?q=orders&type=card");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is applied from the UI", () => {
+        cy.visit("/search?q=orders");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+
+        cy.findByTestId("type-search-filter").click();
+        popover().within(() => {
+          cy.findAllByTestId("type-filter-checkbox").each($el => {
+            cy.wrap($el).click();
+          });
+          cy.findByText("Apply").click();
+        });
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is removed from the UI", () => {
+        cy.visit("/search?q=orders&type=card");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+
+        cy.findByTestId("type-search-filter")
+          .findByLabelText("close icon")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+    });
+
+    describe("created_by filter", () => {
+      it("should send a snowplow event when a search filter is used in the URL", () => {
+        cy.visit("/search?q=orders&created_by=1");
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is applied from the UI", () => {
+        cy.visit("/search?q=orders");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+
+        cy.findByTestId("created_by-search-filter").click();
+        popover().within(() => {
+          cy.findByText("Bobby Tables").click();
+          cy.findByText("Apply").click();
+        });
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is removed from the UI", () => {
+        cy.visit("/search?q=orders&created_by=1");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+
+        cy.findByTestId("created_by-search-filter")
+          .findByLabelText("close icon")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+    });
+
+    describe("last_edited_by filter", () => {
+      it("should send a snowplow event when a search filter is used in the URL", () => {
+        cy.visit("/search?q=orders&last_edited_by=1");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is applied from the UI", () => {
+        cy.visit("/search?q=orders");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+
+        cy.findByTestId("last_edited_by-search-filter").click();
+        popover().within(() => {
+          cy.findByText("Bobby Tables").click();
+          cy.findByText("Apply").click();
+        });
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is removed from the UI", () => {
+        cy.visit("/search?q=orders&last_edited_by=1");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+
+        cy.findByTestId("last_edited_by-search-filter")
+          .findByLabelText("close icon")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+    });
+
+    describe("created_at filter", () => {
+      it("should send a snowplow event when a search filter is used in the URL", () => {
+        cy.visit("/search?q=orders&created_at=thisday");
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is applied from the UI", () => {
+        cy.visit("/search?q=orders");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+
+        cy.findByTestId("created_at-search-filter").click();
+        popover().within(() => {
+          cy.findByText("Today").click();
+        });
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is removed from the UI", () => {
+        cy.visit("/search?q=orders&created_at=thisday");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+
+        cy.findByTestId("created_at-search-filter")
+          .findByLabelText("close icon")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+    });
+
+    describe("last_edited_at filter", () => {
+      it("should send a snowplow event when a search filter is used in the URL", () => {
+        cy.visit("/search?q=orders&last_edited_at=thisday");
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is applied from the UI", () => {
+        cy.visit("/search?q=orders");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+
+        cy.findByTestId("last_edited_at-search-filter").click();
+        popover().within(() => {
+          cy.findByText("Today").click();
+        });
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is removed from the UI", () => {
+        cy.visit("/search?q=orders&last_edited_at=thisday");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+
+        cy.findByTestId("last_edited_at-search-filter")
+          .findByLabelText("close icon")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+    });
+
+    describeEE("verified filter", () => {
+      beforeEach(() => {
+        setTokenFeatures("all");
+      });
+
+      it("should send a snowplow event when a search filter is used in the URL", () => {
+        cy.visit("/search?q=orders&verified=true");
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is applied from the UI", () => {
+        cy.visit("/search?q=orders");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+
+        cy.findByTestId("verified-search-filter")
+          .findByText("Verified items only")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is removed from the UI", () => {
+        cy.visit("/search?q=orders&verified=true");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+
+        cy.findByTestId("verified-search-filter")
+          .findByText("Verified items only")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+    });
+
+    describe("search_native_query filter", () => {
+      it("should send a snowplow event when a search filter is used in the URL", () => {
+        cy.visit("/search?q=orders&search_native_query=true");
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is applied from the UI", () => {
+        cy.visit("/search?q=orders");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 0);
+
+        cy.findByTestId("search_native_query-search-filter")
+          .findByText("Search the contents of native queries")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+
+      it("should send a snowplow event when a search filter is removed from the UI", () => {
+        cy.visit("/search?q=orders&search_native_query=true");
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 1);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+
+        cy.findByTestId("search_native_query-search-filter")
+          .findByText("Search the contents of native queries")
+          .click();
+
+        expectGoodSnowplowEvent({ event: NEW_SEARCH_QUERY_EVENT_NAME }, 2);
+        expectGoodSnowplowEvent({ event: SEARCH_RESULTS_FILTERED_NAME }, 1);
+      });
+    });
   });
 });
 
@@ -1143,14 +1636,12 @@ function expectSearchResultContent({ expectedSearchResults, strict = true }) {
   for (const expectedSearchResult of expectedSearchResults) {
     cy.contains(searchResultItemSelector, expectedSearchResult.name).within(
       () => {
-        cy.findByTestId("search-result-item-name").should(
-          "have.text",
+        cy.findByTestId("search-result-item-name").findByText(
           expectedSearchResult.name,
         );
 
         if (expectedSearchResult.description) {
-          cy.findByTestId("result-description").should(
-            "have.text",
+          cy.findByTestId("result-description").findByText(
             expectedSearchResult.description,
           );
         }
@@ -1161,10 +1652,12 @@ function expectSearchResultContent({ expectedSearchResults, strict = true }) {
           });
         }
         if (expectedSearchResult.timestamp) {
-          cy.findByTestId("revision-history-button").should(
-            "have.text",
+          cy.findByTestId("revision-history-button").findByText(
             expectedSearchResult.timestamp,
           );
+        }
+        if (expectedSearchResult.icon) {
+          cy.icon(expectedSearchResult.icon);
         }
       },
     );

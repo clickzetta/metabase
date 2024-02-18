@@ -1,7 +1,7 @@
 import type { ComponentPropsWithoutRef } from "react";
 import _ from "underscore";
 import userEvent from "@testing-library/user-event";
-import { render, screen, getIcon } from "__support__/ui";
+import { render, screen, getIcon, queryIcon } from "__support__/ui";
 
 import type { Card, Series } from "metabase-types/api";
 import {
@@ -47,6 +47,7 @@ const setup = (props: Partial<Props> = {}) => {
     series = getSeries(),
     onChangeCardAndRun = _.noop,
     settings = {},
+    width = 200,
   } = props;
 
   render(
@@ -54,19 +55,20 @@ const setup = (props: Partial<Props> = {}) => {
       series={series}
       onChangeCardAndRun={onChangeCardAndRun}
       settings={settings}
+      width={width}
       {...props}
     />,
   );
 };
 
 describe("ChartCaption", () => {
-  it("shouldn't render without title", () => {
+  it("should render without a title (metabase#36788)", () => {
     setup();
 
-    expect(screen.queryByTestId("legend-caption")).not.toBeInTheDocument();
+    expect(screen.getByTestId("legend-caption")).toBeInTheDocument();
   });
 
-  it("should render with title", () => {
+  it("should render with a title", () => {
     setup({
       series: getSeries({ card: createMockCard({ name: "card name" }) }),
       settings: { "card.description": "description" },
@@ -86,5 +88,15 @@ describe("ChartCaption", () => {
     const tooltipContent = screen.getByRole("link");
     expect(tooltipContent).toBeInTheDocument();
     expect(tooltipContent).toHaveTextContent("link");
+  });
+
+  it("should hide description icon if too narrow", () => {
+    setup({
+      width: 50,
+      series: getSeries({ card: createMockCard({ name: "card name" }) }),
+      settings: { "card.description": "description" },
+    });
+
+    expect(queryIcon("info")).not.toBeInTheDocument();
   });
 });

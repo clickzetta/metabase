@@ -30,11 +30,11 @@ describe("search > recently viewed", () => {
     // inside the "Orders in a dashboard" dashboard, the order is queried again,
     // which elicits a ViewLog entry
 
-    cy.visit("/");
-
     cy.intercept(`/api/activity/recent_views`).as("recent");
-    cy.findByPlaceholderText("Search…").click();
+    cy.visit("/");
     cy.wait("@recent");
+
+    cy.findByPlaceholderText("Search…").click();
 
     cy.findByTestId("loading-spinner").should("not.exist");
   });
@@ -46,13 +46,33 @@ describe("search > recently viewed", () => {
   });
 
   it("allows to select an item from keyboard", () => {
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Recently viewed");
+    cy.findByTestId("recents-list-container").findByText("Recently viewed");
     cy.get("body").trigger("keydown", { key: "ArrowDown" });
     cy.get("body").trigger("keydown", { key: "ArrowDown" });
     cy.get("body").trigger("keydown", { key: "Enter" });
 
     cy.url().should("match", /\/question\/\d+-orders$/);
+  });
+
+  it("shows up-to-date list of recently viewed items after another page is visited (metabase#36868)", () => {
+    cy.findByPlaceholderText("Search…").click();
+    cy.wait("@recent");
+    cy.findByTestId("loading-spinner").should("not.exist");
+
+    assertRecentlyViewedItem(0, "Orders in a dashboard", "Dashboard");
+    assertRecentlyViewedItem(1, "Orders", "Question");
+    assertRecentlyViewedItem(2, "People", "Table");
+    cy.findAllByTestId("recently-viewed-item-title").should("have.length", 3);
+
+    const recentlyViewedItems = cy.findAllByTestId(
+      "recently-viewed-item-title",
+    );
+    recentlyViewedItems.eq(2).click();
+
+    cy.findByPlaceholderText("Search…").click();
+    cy.wait("@recent");
+
+    assertRecentlyViewedItem(0, "People", "Table");
   });
 });
 

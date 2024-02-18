@@ -60,7 +60,7 @@ const setup = ({
 
 describe("ActionMenu", () => {
   describe("preview", () => {
-    it("should show an option to hide preview for a pinned question", () => {
+    it("should show an option to hide preview for a pinned question", async () => {
       const item = createMockCollectionItem({
         model: "card",
         collection_position: 1,
@@ -71,12 +71,12 @@ describe("ActionMenu", () => {
       setup({ item });
 
       userEvent.click(getIcon("ellipsis"));
-      userEvent.click(screen.getByText("Don’t show visualization"));
+      userEvent.click(await screen.findByText("Don’t show visualization"));
 
       expect(item.setCollectionPreview).toHaveBeenCalledWith(false);
     });
 
-    it("should show an option to show preview for a pinned question", () => {
+    it("should show an option to show preview for a pinned question", async () => {
       const item = createMockCollectionItem({
         model: "card",
         collection_position: 1,
@@ -87,7 +87,7 @@ describe("ActionMenu", () => {
       setup({ item });
 
       userEvent.click(getIcon("ellipsis"));
-      userEvent.click(screen.getByText("Show visualization"));
+      userEvent.click(await screen.findByText("Show visualization"));
 
       expect(item.setCollectionPreview).toHaveBeenCalledWith(true);
     });
@@ -110,10 +110,11 @@ describe("ActionMenu", () => {
   });
 
   describe("moving and archiving", () => {
-    it("should allow to move and archive regular collections", () => {
+    it("should allow to move and archive regular collections", async () => {
       const item = createMockCollectionItem({
         name: "Collection",
         model: "collection",
+        can_write: true,
         setCollection: jest.fn(),
         setArchived: jest.fn(),
       });
@@ -121,11 +122,11 @@ describe("ActionMenu", () => {
       const { onMove } = setup({ item });
 
       userEvent.click(getIcon("ellipsis"));
-      userEvent.click(screen.getByText("Move"));
+      userEvent.click(await screen.findByText("Move"));
       expect(onMove).toHaveBeenCalledWith([item]);
 
       userEvent.click(getIcon("ellipsis"));
-      userEvent.click(screen.getByText("Archive"));
+      userEvent.click(await screen.findByText("Archive"));
       expect(item.setArchived).toHaveBeenCalledWith(true);
     });
 
@@ -133,7 +134,24 @@ describe("ActionMenu", () => {
       const item = createMockCollectionItem({
         name: "My personal collection",
         model: "collection",
+        can_write: true,
         personal_owner_id: 1,
+        setCollection: jest.fn(),
+        setArchived: jest.fn(),
+      });
+
+      setup({ item });
+
+      userEvent.click(getIcon("ellipsis"));
+      expect(screen.queryByText("Move")).not.toBeInTheDocument();
+      expect(screen.queryByText("Archive")).not.toBeInTheDocument();
+    });
+
+    it("should not allow to move and archive read only collections", () => {
+      const item = createMockCollectionItem({
+        name: "My Read Only collection",
+        model: "collection",
+        can_write: false,
         setCollection: jest.fn(),
         setArchived: jest.fn(),
       });
@@ -147,7 +165,7 @@ describe("ActionMenu", () => {
   });
 
   describe("x-rays", () => {
-    it("should allow to x-ray a model when xrays are enabled", () => {
+    it("should allow to x-ray a model when xrays are enabled", async () => {
       const item = createMockCollectionItem({
         id: 1,
         model: "dataset",
@@ -156,7 +174,7 @@ describe("ActionMenu", () => {
       setup({ item, isXrayEnabled: true });
 
       userEvent.click(getIcon("ellipsis"));
-      expect(screen.getByText("X-ray this")).toBeInTheDocument();
+      expect(await screen.findByText("X-ray this")).toBeInTheDocument();
     });
 
     it("should not allow to x-ray a model when xrays are not enabled", () => {
@@ -219,13 +237,13 @@ describe("ActionMenu", () => {
       });
     };
 
-    it("should allow to ask metabot when it is enabled and there is native write access", () => {
+    it("should allow to ask metabot when it is enabled and there is native write access", async () => {
       setupMetabot(true, {
         native_permissions: "write",
       });
 
       userEvent.click(getIcon("ellipsis"));
-      expect(screen.getByText("Ask Metabot")).toBeInTheDocument();
+      expect(await screen.findByText("Ask Metabot")).toBeInTheDocument();
     });
 
     it("should not allow to ask metabot when it is not enabled but there is native write access", () => {

@@ -27,7 +27,12 @@ import {
   dashboardHeader,
   openProductsTable,
   updateDashboardCards,
-  createTextCard,
+  getTextCardDetails,
+  openDashboardMenu,
+  openEmbedModalFromMenu,
+  assertDashboardFixedWidth,
+  assertDashboardFullWidth,
+  createDashboardWithTabs,
 } from "e2e/support/helpers";
 
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
@@ -37,6 +42,11 @@ import {
   ORDERS_DASHBOARD_ID,
   ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
+import {
+  createMockVirtualCard,
+  createMockVirtualDashCard,
+} from "metabase-types/api/mocks";
+import { GRID_WIDTH } from "metabase/lib/dashboard_grid";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PEOPLE, PEOPLE_ID } = SAMPLE_DATABASE;
 
@@ -252,6 +262,63 @@ describe("scenarios > dashboard", () => {
         }
       });
 
+      it("should hide personal collections when adding questions to a dashboard in public collection", () => {
+        const collectionInRoot = {
+          name: "Collection in root collection",
+        };
+        cy.createCollection(collectionInRoot);
+        const myPersonalCollection = "My personal collection";
+        cy.createDashboard({
+          name: "dashboard in root collection",
+        }).then(({ body: { id: dashboardId } }) => {
+          visitDashboard(dashboardId);
+        });
+
+        cy.log("assert that personal collections are not visible");
+        editDashboard();
+        openQuestionsSidebar();
+        sidebar().within(() => {
+          cy.findByText("Our analytics").should("be.visible");
+          cy.findByText(myPersonalCollection).should("not.exist");
+          cy.findByText(collectionInRoot.name).should("be.visible");
+        });
+
+        cy.log("Move dashboard to a personal collection");
+        cy.findByTestId("edit-bar").button("Cancel").click();
+        openDashboardMenu();
+        popover().findByText("Move").click();
+        modal().within(() => {
+          cy.findByRole("heading", { name: myPersonalCollection }).click();
+          cy.button("Move").click();
+        });
+
+        editDashboard();
+        openQuestionsSidebar();
+        sidebar().within(() => {
+          cy.log("go to the root collection");
+          cy.findByText("Our analytics").click();
+          cy.findByText(myPersonalCollection).should("be.visible");
+          cy.findByText(collectionInRoot.name).should("be.visible");
+        });
+
+        cy.log("Move dashboard back to a root collection");
+        cy.findByTestId("edit-bar").button("Cancel").click();
+        openDashboardMenu();
+        popover().findByText("Move").click();
+        modal().within(() => {
+          cy.findByRole("heading", { name: "Our analytics" }).click();
+          cy.button("Move").click();
+        });
+
+        editDashboard();
+        openQuestionsSidebar();
+        sidebar().within(() => {
+          cy.findByText("Our analytics").should("be.visible");
+          cy.findByText(myPersonalCollection).should("not.exist");
+          cy.findByText(collectionInRoot.name).should("be.visible");
+        });
+      });
+
       it("should save a dashboard after adding a saved question from an empty state (metabase#29450)", () => {
         cy.findByTestId("dashboard-empty-state").within(() => {
           cy.findByText("This dashboard is looking empty.");
@@ -336,7 +403,7 @@ describe("scenarios > dashboard", () => {
         cy.log("Should revert the title change if editing is cancelled");
         cy.findByTestId("dashboard-name-heading").clear().type(newTitle).blur();
         cy.findByTestId("edit-bar").button("Cancel").click();
-        modal().button("Leave anyway").click();
+        modal().button("Discard changes").click();
         cy.findByTestId("edit-bar").should("not.exist");
         cy.get("@updateDashboardSpy").should("not.have.been.called");
         cy.findByDisplayValue(originalDashboardName);
@@ -440,13 +507,13 @@ describe("scenarios > dashboard", () => {
         cy.createDashboard().then(({ body: { id: dashboard_id } }) => {
           const cards = [
             // the bottom card intentionally goes first to have unsorted cards coming from the BE
-            createTextCard({
+            getTextCardDetails({
               row: 1,
               size_x: 24,
               size_y: 1,
               text: "bottom",
             }),
-            createTextCard({
+            getTextCardDetails({
               row: 0,
               size_x: 24,
               size_y: 1,
@@ -463,6 +530,68 @@ describe("scenarios > dashboard", () => {
         getDashboardCards().eq(1).contains("bottom");
       },
     );
+
+    it("should allow the creator to change the dashboard width to 'fixed' or 'full'", () => {
+      const TAB_1 = {
+        id: 1,
+        name: "Tab 1",
+      };
+      const TAB_2 = {
+        id: 2,
+        name: "Tab 2",
+      };
+      const DASHBOARD_TEXT_FILTER = {
+        id: "94f9e513",
+        name: "Text filter",
+        slug: "filter-text",
+        type: "string/contains",
+      };
+
+      createDashboardWithTabs({
+        tabs: [TAB_1, TAB_2],
+        parameters: [{ ...DASHBOARD_TEXT_FILTER, default: "Example Input" }],
+        dashcards: [
+          createMockVirtualDashCard({
+            id: -1,
+            dashboard_tab_id: TAB_1.id,
+            size_x: GRID_WIDTH,
+            parameter_mappings: [
+              { parameter_id: "94f9e513", target: ["text-tag", "Name"] },
+            ],
+            card: createMockVirtualCard({ display: "text" }),
+            visualization_settings: {
+              text: "Top: {{Name}}",
+            },
+          }),
+          createMockVirtualDashCard({
+            id: -2,
+            size_x: GRID_WIDTH,
+            dashboard_tab_id: TAB_1.id,
+            card: createMockVirtualCard({ display: "text" }),
+            visualization_settings: {
+              text: "Bottom",
+            },
+          }),
+        ],
+      }).then(dashboard => visitDashboard(dashboard.id));
+
+      // new dashboards should default to 'fixed' width
+      assertDashboardFixedWidth();
+
+      editDashboard();
+
+      // toggle full-width
+      cy.findByLabelText("Toggle width").click();
+      popover().findByText("Full width").click();
+
+      assertDashboardFullWidth();
+
+      // confirm it saves the state after saving and refreshing
+      saveDashboard();
+      cy.reload();
+
+      assertDashboardFullWidth();
+    });
   });
 
   it("should add a filter", () => {
@@ -689,11 +818,11 @@ describe("scenarios > dashboard", () => {
     });
 
     cy.log("Connect filter to the existing card");
-    cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}/cards`, {
-      cards: [
+    cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}`, {
+      dashcards: [
         {
-          id: 1,
-          card_id: 1,
+          id: ORDERS_DASHBOARD_DASHCARD_ID,
+          card_id: ORDERS_QUESTION_ID,
           row: 0,
           col: 0,
           size_x: 16,
@@ -701,7 +830,7 @@ describe("scenarios > dashboard", () => {
           parameter_mappings: [
             {
               parameter_id: FILTER_ID,
-              card_id: 1,
+              card_id: ORDERS_QUESTION_ID,
               target: [
                 "dimension",
                 [
@@ -750,8 +879,8 @@ describe("scenarios > dashboard", () => {
         }).then(({ body: { id: NEW_DASHBOARD_ID } }) => {
           const COLUMN_REF = `["ref",["field-id",${ORDERS.ID}]]`;
           // Add click behavior to the existing "Orders in a dashboard" dashboard
-          cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}/cards`, {
-            cards: [
+          cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}`, {
+            dashcards: [
               {
                 id: ORDERS_DASHBOARD_DASHCARD_ID,
                 card_id: ORDERS_QUESTION_ID,
@@ -795,8 +924,8 @@ describe("scenarios > dashboard", () => {
 
   it("should be possible to scroll vertically after fullscreen layer is closed (metabase#15596)", () => {
     // Make this dashboard card extremely tall so that it spans outside of visible viewport
-    cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}/cards`, {
-      cards: [
+    cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}`, {
+      dashcards: [
         {
           id: ORDERS_DASHBOARD_DASHCARD_ID,
           card_id: ORDERS_QUESTION_ID,
@@ -815,11 +944,13 @@ describe("scenarios > dashboard", () => {
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.contains("37.65");
     assertScrollBarExists();
-    cy.icon("share").click();
-    cy.get(".Modal--full").within(() => {
+
+    openEmbedModalFromMenu();
+
+    modal().within(() => {
       cy.icon("close").click();
     });
-    cy.get(".Modal--full").should("not.exist");
+    modal().should("not.exist");
     assertScrollBarExists();
   });
 
@@ -839,8 +970,8 @@ describe("scenarios > dashboard", () => {
     });
 
     cy.log("Connect filter to the existing card");
-    cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}/cards`, {
-      cards: [
+    cy.request("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}`, {
+      dashcards: [
         {
           id: ORDERS_DASHBOARD_DASHCARD_ID,
           card_id: ORDERS_QUESTION_ID,
@@ -916,6 +1047,17 @@ describeWithSnowplow("scenarios > dashboard", () => {
 
   afterEach(() => {
     expectNoBadSnowplowEvents();
+  });
+
+  it("saving a dashboard should track a 'dashboard_saved' snowplow event", () => {
+    visitDashboard(ORDERS_DASHBOARD_ID);
+    editDashboard();
+    const newTitle = "New title";
+    cy.findByTestId("dashboard-name-heading").clear().type(newTitle).blur();
+    saveDashboard();
+    expectGoodSnowplowEvent({
+      event: "dashboard_saved",
+    });
   });
 
   it("should allow users to add link cards to dashboards", () => {

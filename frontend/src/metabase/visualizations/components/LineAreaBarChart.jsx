@@ -89,18 +89,6 @@ export default class LineAreaBarChart extends Component {
     }
   }
 
-  static propTypes = {
-    card: PropTypes.object.isRequired,
-    series: PropTypes.array.isRequired,
-    settings: PropTypes.object.isRequired,
-    actionButtons: PropTypes.node,
-    showTitle: PropTypes.bool,
-    isDashboard: PropTypes.bool,
-    headerIcon: PropTypes.object,
-  };
-
-  static defaultProps = {};
-
   getHoverClasses() {
     const { hovered } = this.props;
     if (hovered && hovered.index != null) {
@@ -165,8 +153,6 @@ export default class LineAreaBarChart extends Component {
       settings,
       showTitle,
       actionButtons,
-      onAddSeries,
-      onEditSeries,
       onRemoveSeries,
       onChangeCardAndRun,
     } = this.props;
@@ -181,7 +167,7 @@ export default class LineAreaBarChart extends Component {
     const canSelectTitle = cardIds.size === 1 && onChangeCardAndRun;
 
     const hasMultipleSeries = series.length > 1;
-    const canChangeSeries = onAddSeries || onEditSeries || onRemoveSeries;
+    const canChangeSeries = onRemoveSeries;
     const hasLegendButtons = !hasTitle && actionButtons;
     const hasLegend =
       hasMultipleSeries || canChangeSeries || hasLegendButtons || hasBreakout;
@@ -220,11 +206,9 @@ export default class LineAreaBarChart extends Component {
 
   handleSelectSeries = (event, index, isReversed) => {
     const {
-      card,
       series,
       settings,
       visualizationIsClickable,
-      onEditSeries,
       onVisualizationClick,
       onChangeCardAndRun,
     } = this.props;
@@ -233,11 +217,7 @@ export default class LineAreaBarChart extends Component {
 
     const single = orderedSeries[index];
 
-    const hasBreakout = card._breakoutColumn != null;
-
-    if (onEditSeries && !hasBreakout) {
-      onEditSeries(event, index);
-    } else if (single.clicked && visualizationIsClickable(single.clicked)) {
+    if (single.clicked && visualizationIsClickable(single.clicked)) {
       onVisualizationClick({
         ...single.clicked,
         element: event.currentTarget,
@@ -262,6 +242,7 @@ export default class LineAreaBarChart extends Component {
       onRemoveSeries,
       settings,
       canRemoveSeries,
+      width,
     } = this.props;
 
     // Note (EmmadUsmani): Stacked charts should be reversed so series are stacked
@@ -296,6 +277,7 @@ export default class LineAreaBarChart extends Component {
             icon={headerIcon}
             actionButtons={actionButtons}
             onSelectTitle={canSelectTitle ? this.handleSelectTitle : undefined}
+            width={width}
           />
         )}
         <LegendLayout
@@ -325,6 +307,17 @@ export default class LineAreaBarChart extends Component {
     );
   }
 }
+
+LineAreaBarChart.propTypes = {
+  card: PropTypes.object.isRequired,
+  series: PropTypes.array.isRequired,
+  settings: PropTypes.object.isRequired,
+  actionButtons: PropTypes.node,
+  showTitle: PropTypes.bool,
+  isDashboard: PropTypes.bool,
+  headerIcon: PropTypes.object,
+  width: PropTypes.number,
+};
 
 function transformSingleSeries(s, series, seriesIndex) {
   const { card, data } = s;
