@@ -1,36 +1,29 @@
 /* eslint-disable react/prop-types */
 import { Component } from "react";
 import { Motion, spring } from "react-motion";
+import { connect } from "react-redux";
 import { t } from "ttag";
+import _ from "underscore";
 
 import ExplicitSize from "metabase/components/ExplicitSize";
-import { SIDEBAR_SIZES } from "metabase/query_builder/constants";
 import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
 import Toaster from "metabase/components/Toaster";
+import { rememberLastUsedDatabase } from "metabase/query_builder/actions";
+import { SIDEBAR_SIZES } from "metabase/query_builder/constants";
 import { TimeseriesChrome } from "metabase/querying";
-
 import * as Lib from "metabase-lib";
 
 import DatasetEditor from "../DatasetEditor";
 import NativeQueryEditor from "../NativeQueryEditor";
-import QueryVisualization from "../QueryVisualization";
-import DataReference from "../dataref/DataReference";
-import { TagEditorSidebar } from "../template_tags/TagEditorSidebar";
-import { SnippetSidebar } from "../template_tags/SnippetSidebar";
-import SavedQuestionIntroModal from "../SavedQuestionIntroModal";
-
 import QueryModals from "../QueryModals";
-import ChartSettingsSidebar from "./sidebars/ChartSettingsSidebar";
-import ChartTypeSidebar from "./sidebars/ChartTypeSidebar";
-import { SummarizeSidebar } from "./sidebars/SummarizeSidebar";
-import { QuestionInfoSidebar } from "./sidebars/QuestionInfoSidebar";
+import QueryVisualization from "../QueryVisualization";
+import { SavedQuestionIntroModal } from "../SavedQuestionIntroModal";
+import DataReference from "../dataref/DataReference";
+import { SnippetSidebar } from "../template_tags/SnippetSidebar";
+import { TagEditorSidebar } from "../template_tags/TagEditorSidebar";
 
-import TimelineSidebar from "./sidebars/TimelineSidebar";
 import NewQuestionHeader from "./NewQuestionHeader";
-import ViewFooter from "./ViewFooter";
-import ViewSidebar from "./ViewSidebar";
 import NewQuestionView from "./View/NewQuestionView";
-
 import QueryViewNotebook from "./View/QueryViewNotebook";
 import {
   BorderedViewTitleHeader,
@@ -42,6 +35,13 @@ import {
   StyledDebouncedFrame,
   StyledSyncedParametersList,
 } from "./View.styled";
+import ViewFooter from "./ViewFooter";
+import ViewSidebar from "./ViewSidebar";
+import ChartSettingsSidebar from "./sidebars/ChartSettingsSidebar";
+import ChartTypeSidebar from "./sidebars/ChartTypeSidebar";
+import { QuestionInfoSidebar } from "./sidebars/QuestionInfoSidebar";
+import { SummarizeSidebar } from "./sidebars/SummarizeSidebar";
+import TimelineSidebar from "./sidebars/TimelineSidebar";
 
 class View extends Component {
   getLeftSidebar = () => {
@@ -231,7 +231,9 @@ class View extends Component {
       isDirty,
       isNativeEditorOpen,
       setParameterValueToDefault,
+      onSetDatabaseId,
     } = this.props;
+
     const legacyQuery = question.legacyQuery();
 
     // Normally, when users open native models,
@@ -242,7 +244,7 @@ class View extends Component {
     // This check makes it hide the editor in this particular case
     // More details: https://github.com/metabase/metabase/pull/20161
     const { isEditable } = Lib.queryDisplayInfo(question.query());
-    if (question.isDataset() && !isEditable) {
+    if (question.type() === "model" && !isEditable) {
       return null;
     }
 
@@ -256,14 +258,26 @@ class View extends Component {
           isInitiallyOpen={isNativeEditorOpen}
           datasetQuery={card && card.dataset_query}
           setParameterValueToDefault={setParameterValueToDefault}
+          onSetDatabaseId={onSetDatabaseId}
         />
       </NativeQueryEditorContainer>
     );
   };
 
   renderMain = ({ leftSidebar, rightSidebar }) => {
-    const { question, mode, parameters, isLiveResizable, setParameterValue } =
-      this.props;
+    const {
+      question,
+      mode,
+      parameters,
+      isLiveResizable,
+      setParameterValue,
+      queryBuilderMode,
+    } = this.props;
+
+    if (queryBuilderMode === "notebook") {
+      // we need to render main only in view mode
+      return;
+    }
 
     const queryMode = mode && mode.queryMode();
     const { isNative } = Lib.queryDisplayInfo(question.query());
@@ -292,7 +306,11 @@ class View extends Component {
             mode={queryMode}
           />
         </StyledDebouncedFrame>
-        <TimeseriesChrome {...this.props} className="flex-no-shrink" />
+        <TimeseriesChrome
+          question={this.props.question}
+          updateQuestion={this.props.updateQuestion}
+          className="flex-no-shrink"
+        />
         <ViewFooter {...this.props} className="flex-no-shrink" />
       </QueryBuilderMain>
     );
@@ -333,7 +351,9 @@ class View extends Component {
       );
     }
 
-    if (question.isDataset() && queryBuilderMode === "dataset") {
+    const isModel = question.type() === "model";
+
+    if (isModel && queryBuilderMode === "dataset") {
       return (
         <>
           <DatasetEditor {...this.props} />
@@ -353,7 +373,10 @@ class View extends Component {
 
     return (
       <div className="full-height">
-        <QueryBuilderViewRoot className="QueryBuilder">
+        <QueryBuilderViewRoot
+          className="QueryBuilder"
+          data-testid="query-builder-root"
+        >
           {isHeaderVisible && this.renderHeader()}
           <QueryBuilderContentContainer>
             {!isNative && (
@@ -379,6 +402,7 @@ class View extends Component {
         {isShowingNewbModal && (
           <SavedQuestionIntroModal
             question={question}
+            isShowingNewbModal={isShowingNewbModal}
             onClose={() => closeQbNewbModal()}
           />
         )}
@@ -397,4 +421,11 @@ class View extends Component {
   }
 }
 
-export default ExplicitSize({ refreshMode: "debounceLeading" })(View);
+const mapDispatchToProps = dispatch => ({
+  onSetDatabaseId: id => dispatch(rememberLastUsedDatabase(id)),
+});
+
+export default _.compose(
+  ExplicitSize({ refreshMode: "debounceLeading" }),
+  connect(null, mapDispatchToProps),
+)(View);

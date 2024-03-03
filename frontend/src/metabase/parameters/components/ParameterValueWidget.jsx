@@ -1,39 +1,43 @@
-import { createRef, Component } from "react";
-import PropTypes from "prop-types";
-import { t } from "ttag";
 import cx from "classnames";
+import PropTypes from "prop-types";
+import { createRef, Component } from "react";
+import { t } from "ttag";
 
+import { DateAllOptionsWidget } from "metabase/components/DateAllOptionsWidget";
+import DateMonthYearWidget from "metabase/components/DateMonthYearWidget";
+import DateQuarterYearWidget from "metabase/components/DateQuarterYearWidget";
+import { DateRangeWidget } from "metabase/components/DateRangeWidget";
+import DateRelativeWidget from "metabase/components/DateRelativeWidget";
+import { DateSingleWidget } from "metabase/components/DateSingleWidget";
+import PopoverWithTrigger from "metabase/components/PopoverWithTrigger";
+import { TextWidget } from "metabase/components/TextWidget";
+import FormattedParameterValue from "metabase/parameters/components/FormattedParameterValue";
+import { WidgetStatusIcon } from "metabase/parameters/components/WidgetStatusIcon";
+import { NumberInputWidget } from "metabase/parameters/components/widgets/NumberInputWidget";
+import { StringInputWidget } from "metabase/parameters/components/widgets/StringInputWidget";
 import {
   getParameterIconName,
   getParameterWidgetTitle,
 } from "metabase/parameters/utils/ui";
-
-import PopoverWithTrigger from "metabase/components/PopoverWithTrigger";
 import { Icon } from "metabase/ui";
-import { DateSingleWidget } from "metabase/components/DateSingleWidget";
-import { DateRangeWidget } from "metabase/components/DateRangeWidget";
-import DateRelativeWidget from "metabase/components/DateRelativeWidget";
-import DateMonthYearWidget from "metabase/components/DateMonthYearWidget";
-import DateQuarterYearWidget from "metabase/components/DateQuarterYearWidget";
-import { DateAllOptionsWidget } from "metabase/components/DateAllOptionsWidget";
-import { TextWidget } from "metabase/components/TextWidget";
-import { WidgetStatusIcon } from "metabase/parameters/components/WidgetStatusIcon";
-import FormattedParameterValue from "metabase/parameters/components/FormattedParameterValue";
-import { NumberInputWidget } from "metabase/parameters/components/widgets/NumberInputWidget";
-import { StringInputWidget } from "metabase/parameters/components/widgets/StringInputWidget";
 import {
   getNumberParameterArity,
   getStringParameterArity,
 } from "metabase-lib/parameters/utils/operators";
+import { hasFields } from "metabase-lib/parameters/utils/parameter-fields";
 import { getQueryType } from "metabase-lib/parameters/utils/parameter-source";
 import {
   isDateParameter,
   isNumberParameter,
 } from "metabase-lib/parameters/utils/parameter-type";
-import { hasFields } from "metabase-lib/parameters/utils/parameter-fields";
-import { areParameterValuesIdentical } from "metabase-lib/parameters/utils/parameter-values";
+import {
+  areParameterValuesIdentical,
+  parameterHasNoDisplayValue,
+} from "metabase-lib/parameters/utils/parameter-values";
+
+import S from "./ParameterValueWidget.module.css";
+import { ParameterValueWidgetTrigger } from "./ParameterValueWidgetTrigger";
 import ParameterFieldWidget from "./widgets/ParameterFieldWidget/ParameterFieldWidget";
-import S from "./ParameterValueWidget.css";
 
 class ParameterValueWidget extends Component {
   static propTypes = {
@@ -55,6 +59,7 @@ class ParameterValueWidget extends Component {
     // Should be used for dashboards and native questions in the parameter bar,
     // Don't use in settings sidebars.
     enableRequiredBehavior: PropTypes.bool,
+    mimicMantine: PropTypes.bool,
   };
 
   state = { isFocused: false };
@@ -142,7 +147,7 @@ class ParameterValueWidget extends Component {
     ) {
       return (
         <WidgetStatusIcon
-          name="refresh"
+          name="time_history"
           onClick={() => setParameterValueToDefault(this.props.parameter.id)}
         />
       );
@@ -150,20 +155,25 @@ class ParameterValueWidget extends Component {
   }
 
   render() {
-    const { parameter, value, isEditing, placeholder, className } = this.props;
+    const {
+      parameter,
+      value,
+      isEditing,
+      placeholder,
+      className,
+      mimicMantine,
+    } = this.props;
     const { isFocused } = this.state;
-    const hasValue = value != null;
+    const hasValue = !parameterHasNoDisplayValue(value);
     const noPopover = hasNoPopover(parameter);
     const parameterTypeIcon = getParameterIconName(parameter);
     const showTypeIcon = !isEditing && !hasValue && !isFocused;
 
     if (noPopover) {
       return (
-        <div
-          ref={this.trigger}
-          className={cx(S.parameter, S.noPopover, className, {
-            [S.selected]: hasValue,
-          })}
+        <ParameterValueWidgetTrigger
+          className={cx(S.noPopover, className)}
+          hasValue={hasValue}
         >
           {showTypeIcon && (
             <Icon
@@ -179,7 +189,7 @@ class ParameterValueWidget extends Component {
             onPopoverClose={this.onPopoverClose}
           />
           {this.getActionIcon()}
-        </div>
+        </ParameterValueWidgetTrigger>
       );
     }
 
@@ -194,13 +204,12 @@ class ParameterValueWidget extends Component {
         ref={this.valuePopover}
         targetOffsetX={16}
         triggerElement={
-          <div
+          <ParameterValueWidgetTrigger
             ref={this.trigger}
-            className={cx(S.parameter, className, {
-              [S.selected]: hasValue,
-            })}
-            role="button"
-            aria-label={placeholder}
+            hasValue={hasValue}
+            className={className}
+            ariaLabel={placeholder}
+            mimicMantine={mimicMantine}
           >
             {showTypeIcon && (
               <Icon
@@ -217,7 +226,7 @@ class ParameterValueWidget extends Component {
               />
             </div>
             {this.getActionIcon()}
-          </div>
+          </ParameterValueWidgetTrigger>
         }
         target={this.getTargetRef}
         // make sure the full date picker will expand to fit the dual calendars
