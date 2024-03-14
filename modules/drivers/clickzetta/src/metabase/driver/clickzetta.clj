@@ -274,8 +274,7 @@
       (log/info "Executing ClickZetta Lakehouse query" replace_sql)
     (let [inner-query (-> (assoc inner-query
                                    :query  replace_sql
-                                   :max-rows (mbql.u/query->max-rows-limit outer-query))
-                            (dissoc :params))
+                                   :max-rows (mbql.u/query->max-rows-limit outer-query)))
             query       (assoc outer-query :native inner-query)]
         ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond))))
 
