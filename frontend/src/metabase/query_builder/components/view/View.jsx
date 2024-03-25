@@ -7,6 +7,8 @@ import _ from "underscore";
 import ExplicitSize from "metabase/components/ExplicitSize";
 import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
 import Toaster from "metabase/components/Toaster";
+import CS from "metabase/css/core/index.css";
+import QueryBuilderS from "metabase/css/query_builder.module.css";
 import { rememberLastUsedDatabase } from "metabase/query_builder/actions";
 import { SIDEBAR_SIZES } from "metabase/query_builder/constants";
 import { TimeseriesChrome } from "metabase/querying";
@@ -24,7 +26,7 @@ import { TagEditorSidebar } from "../template_tags/TagEditorSidebar";
 
 import NewQuestionHeader from "./NewQuestionHeader";
 import NewQuestionView from "./View/NewQuestionView";
-import QueryViewNotebook from "./View/QueryViewNotebook";
+import { NotebookContainer } from "./View/NotebookContainer";
 import {
   BorderedViewTitleHeader,
   NativeQueryEditorContainer,
@@ -220,7 +222,7 @@ class View extends Component {
         />
         {/*This is used so that the New Question Header is unmounted after the animation*/}
         <Transition mounted={isNewQuestion} transition={fadeIn} duration={300}>
-          {style => <NewQuestionHeader className="spread" style={style} />}
+          {style => <NewQuestionHeader className={CS.spread} style={style} />}
         </Transition>
       </QueryBuilderViewHeaderContainer>
     );
@@ -305,16 +307,16 @@ class View extends Component {
           <QueryVisualization
             {...this.props}
             noHeader
-            className="spread"
+            className={CS.spread}
             mode={queryMode}
           />
         </StyledDebouncedFrame>
         <TimeseriesChrome
           question={this.props.question}
           updateQuestion={this.props.updateQuestion}
-          className="flex-no-shrink"
+          className={CS.flexNoShrink}
         />
-        <ViewFooter {...this.props} className="flex-no-shrink" />
+        <ViewFooter {...this.props} className={CS.flexNoShrink} />
       </QueryBuilderMain>
     );
   };
@@ -377,14 +379,14 @@ class View extends Component {
     return (
       <div className="full-height">
         <QueryBuilderViewRoot
-          className="QueryBuilder"
+          className={QueryBuilderS.QueryBuilder}
           data-testid="query-builder-root"
         >
           {isHeaderVisible && this.renderHeader()}
           <QueryBuilderContentContainer>
             {!isNative && (
-              <QueryViewNotebook
-                isNotebookContainerOpen={isNotebookContainerOpen}
+              <NotebookContainer
+                isOpen={isNotebookContainerOpen}
                 {...this.props}
               />
             )}
