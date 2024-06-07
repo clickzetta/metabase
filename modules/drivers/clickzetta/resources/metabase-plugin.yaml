@@ -40,6 +40,12 @@ driver:
       required: true
       placeholder: "public"
       description: "The schema name of your ClickZetta Lakehouse."
+    - name: additional
+      display-name: Additional Properties
+      type: string
+      required: false
+      placeholder: "key1=value1&key2=value2"
+      description: "Additional properties to be passed to the JDBC driver."
 init:
   - step: load-namespace
     namespace: metabase.driver.clickzetta

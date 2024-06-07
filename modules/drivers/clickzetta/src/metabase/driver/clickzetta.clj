@@ -149,13 +149,14 @@
 
 
 (defmethod sql-jdbc.conn/connection-details->spec :clickzetta
-  [_ {:keys [user password virtualCluster schema instance service workspace]}]
-
-  (sql-jdbc.common/handle-additional-options {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
-                                              :subprotocol                   "clickzetta"
-                                              :subname                       (str "//" instance "." service "/" workspace)
-                                              }
-                                             {:additional-options (str "user=" user "&password=" password "&virtualCluster=" virtualCluster "&schema=" schema)}))
+  [_ {:keys [user password virtualCluster schema instance service workspace additional]}]
+  (let [additional-options-base (str "user=" user "&password=" password "&virtualCluster=" virtualCluster "&schema=" schema)
+        additional-options-with-additional-params (if (seq additional) (str additional-options-base "&" additional) additional-options-base)]
+    (sql-jdbc.common/handle-additional-options {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
+                                                :subprotocol                   "clickzetta"
+                                                :subname                       (str "//" instance "." service "/" workspace)
+                                                }
+                                               {:additional-options additional-options-with-additional-params})))
 
 
 
