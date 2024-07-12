@@ -92,18 +92,43 @@
     :STRUCT                     :type/*
     :ARRAY                      :type/*} base-type))
 
+
+(defn- describe-schema [driver conn workspace schema]
+  (log/info "Get tables of schema : " schema)
+  (when (not-empty schema)
+    (let [sql (str "SHOW TABLES IN " schema)]
+      (log/info "Get tables by : " sql)
+      (into #{} (map (fn [{table :table_name}]
+                       {:name        table
+                        :schema      schema}))
+                     (jdbc/reducible-query {:connection conn} sql)))))
+
+
+(def ^:private excluded-schemas
+  "The set of schemas that should be excluded when querying all schemas."
+  #{"information_schema"})
+
+(defn- all-schemas [driver conn workspace]
+  (let [sql (str "SHOW SCHEMAS")]
+    (log/info "Get all schemas: " sql)
+    (into []
+          (map (fn [{:keys [schema_name]}]
+                 (when-not (contains? excluded-schemas schema_name)
+                 (describe-schema driver conn workspace schema_name))))
+          (jdbc/reducible-query {:connection conn} sql))))
+
+
 (defmethod driver/describe-database :clickzetta
-  [driver database]
-  {:tables
-   (sql-jdbc.execute/do-with-connection-with-options
-    driver
-    database
-    nil
-    (fn [^Connection conn]
-      (set
-       (for [{schema :schema_name, table-name :table_name} (jdbc/query {:connection conn} ["show tables"])]
-         {:name   table-name
-          :schema schema}))))})
+  [driver {{:keys [workspace schema] :as _details} :details :as database}]
+  (sql-jdbc.execute/do-with-connection-with-options
+   driver
+   database
+   nil
+   (fn [^Connection conn]
+     (let [schemas (if schema #{(describe-schema driver conn workspace schema)}
+                     (all-schemas driver conn workspace))]
+       (log/info "Get all schemas done: " schemas)
+       {:tables (reduce set/union #{} schemas)}))))
 
 
 (defn- valid-describe-table-row? [{:keys [column_name data_type]}]
@@ -151,7 +176,8 @@
 (defmethod sql-jdbc.conn/connection-details->spec :clickzetta
   [_ {:keys [user password virtualCluster schema instance service workspace additional]}]
   (let [additional-options-base (str "user=" user "&password=" password "&virtualCluster=" virtualCluster "&schema=" schema)
-        additional-options-with-additional-params (if (seq additional) (str additional-options-base "&" additional) additional-options-base)]
+        additional-options (if (seq schema) (str additional-options-base "&schema=" schema) additional-options-base)
+        additional-options-with-additional-params (if (seq additional) (str additional-options "&" additional) additional-options)]
     (sql-jdbc.common/handle-additional-options {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
                                                 :subprotocol                   "clickzetta"
                                                 :subname                       (str "//" instance "." service "/" workspace)
@@ -313,6 +339,12 @@
       (t/zoned-date-time (t/local-date t) (t/local-time 0) (t/zone-id "UTC")))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP]
+  [_ ^ResultSet rs _rsmeta ^Integer i]
+  (fn []
+    (when-let [t (.getTimestamp rs i)]
+      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
+
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP_WITH_TIMEZONE]
   [_ ^ResultSet rs _rsmeta ^Integer i]
   (fn []
     (when-let [t (.getTimestamp rs i)]
