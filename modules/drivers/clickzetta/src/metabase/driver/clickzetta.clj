@@ -75,22 +75,23 @@
 (defmethod sql-jdbc.sync/database-type->base-type :clickzetta
   [_ base-type]
   ({
-    :DECIMAL                    :type/Decimal
-    :INT                        :type/Integer
-    :BIGINT                     :type/BigInteger
-    :SMALLINT                   :type/Integer
-    :TINYINT                    :type/Integer
-    :FLOAT                      :type/Float
-    :DOUBLE                     :type/Float
-    :VARCHAR                    :type/Text
-    :CHAR                       :type/Text
-    :STRING                     :type/Text
-    :BOOLEAN                    :type/Boolean
-    :DATE                       :type/Date
-    :TIMESTAMP_LTZ              :type/DateTime
-    :MAP                        :type/*
-    :STRUCT                     :type/*
-    :ARRAY                      :type/*} base-type))
+     :DECIMAL                    :type/Decimal
+     :INT                        :type/Integer
+     :BIGINT                     :type/BigInteger
+     :SMALLINT                   :type/Integer
+     :TINYINT                    :type/Integer
+     :FLOAT                      :type/Float
+     :DOUBLE                     :type/Float
+     :VARCHAR                    :type/Text
+     :CHAR                       :type/Text
+     :STRING                     :type/Text
+     :BOOLEAN                    :type/Boolean
+     :DATE                       :type/Date
+     :TIMESTAMP_LTZ              :type/DateTime
+     :MAP                        :type/Dictionary
+     :STRUCT                     :type/*
+     :ARRAY                      :type/Array
+     :BINARY                     :type/*} base-type))
 
 
 (defn- describe-schema [driver conn workspace schema]
@@ -101,7 +102,7 @@
       (into #{} (map (fn [{table :table_name}]
                        {:name        table
                         :schema      schema}))
-                     (jdbc/reducible-query {:connection conn} sql)))))
+            (jdbc/reducible-query {:connection conn} sql)))))
 
 
 (def ^:private excluded-schemas
@@ -114,7 +115,7 @@
     (into []
           (map (fn [{:keys [schema_name]}]
                  (when-not (contains? excluded-schemas schema_name)
-                 (describe-schema driver conn workspace schema_name))))
+                   (describe-schema driver conn workspace schema_name))))
           (jdbc/reducible-query {:connection conn} sql))))
 
 
@@ -159,7 +160,7 @@
                :when (valid-describe-table-row? result)]
            {:name              col-name
             :database-type     (u/upper-case-en(first(str/split (first(str/split data-type #" ")) #"\(")))
-            :base-type         (sql-jdbc.sync/database-type->base-type :clickzetta (keyword (u/upper-case-en(first(str/split (first(str/split data-type #" ")) #"\(")))))
+            :base-type         (sql-jdbc.sync/database-type->base-type :clickzetta (keyword (u/upper-case-en(first(str/split (first(str/split (first(str/split data-type #" ")) #"\(")) #"\<")))))
             :database-position idx})))))})
 
 (defmethod db.spec/spec :clickzetta
