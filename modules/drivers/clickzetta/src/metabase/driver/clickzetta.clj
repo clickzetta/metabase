@@ -55,7 +55,8 @@
                               :now                                    true
                               :convert-timezone                       true
                               :connection-impersonation               false
-                              :connection-impersonation-requires-role false}]
+                              :connection-impersonation-requires-role false
+                              :foreign-keys                           false}]
   (defmethod driver/database-supports? [:clickzetta feature] [_driver _feature _db] supported?))
 
 (defmethod driver/humanize-connection-error-message :clickzetta
@@ -71,7 +72,8 @@
   [driver database]
   (merge
    ((get-method sql-jdbc.conn/data-warehouse-connection-pool-properties :sql-jdbc) driver database)
-   {"preferredTestQuery" "SELECT 1"}))
+   {"testConnectionOnCheckout" false
+    "testConnectionOnCheckin" false}))
 
 (defmethod driver/db-start-of-week :clickzetta
   [_]
@@ -190,6 +192,9 @@
                                                 }
                                                {:additional-options additional-options-with-additional-params})))
 
+(defmethod driver/can-connect? :clickzetta
+  [driver { :as details}]
+  true)
 
 ;----------------------------------------------------------------------------
 
@@ -335,9 +340,9 @@
                common-name (:common_name @*current-user*)
                query-tag-str (format "set query_tag='%s';" common-name)
                real-query (str query-tag-str replace_sql)]
-          (log/info "Executing ClickZetta Lakehouse query" replace_sql)
+          (log/info "Executing ClickZetta Lakehouse query" real-query)
           (let [inner-query (-> (assoc inner-query
-                                       :query  replace_sql
+                                       :query  real-query
                                        :max-rows (mbql.u/query->max-rows-limit outer-query)))
                 query       (assoc outer-query :native inner-query)]
             ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond)))))))

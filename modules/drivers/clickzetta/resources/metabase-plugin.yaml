@@ -46,6 +46,8 @@ driver:
       required: false
       placeholder: "key1=value1&key2=value2"
       description: "Additional properties to be passed to the JDBC driver."
+    - advanced-options-start
+    - default-advanced-options
 init:
   - step: load-namespace
     namespace: metabase.driver.clickzetta
