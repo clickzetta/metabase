@@ -339,15 +339,12 @@
         (let [
                common-name (:common_name @*current-user*)
                query-tag-str (format "set query_tag='%s';" common-name)
-               real-query (str query-tag-str replace_sql)]
-          (log/info "Executing ClickZetta Lakehouse query" real-query)
-          (let [remark (qp.util/query->remark driver outer-query)
-                query-with-comment    (str "-- " remark "\n" sql)
-                inner-query (-> (assoc inner-query
-                                       :query  query-with-comment
+               remark (qp.util/query->remark driver outer-query)
+               real-query (str query-tag-str "\n-- " remark "\n" replace_sql)]
+          (let [inner-query (-> (assoc inner-query
+                                       :query  real-query
                                        :max-rows (mbql.u/query->max-rows-limit outer-query)))
                 query       (assoc outer-query :native inner-query)]
-            (log/info "Indeed Executing ClickZetta Lakehouse query" query)
             ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond)))))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/DATE]
