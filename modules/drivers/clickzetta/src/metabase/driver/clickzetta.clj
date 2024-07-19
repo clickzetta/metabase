@@ -32,6 +32,7 @@
     [metabase.query-processor.error-type :as qp.error-type]
     [metabase.query-processor.store :as qp.store]
     [metabase.query-processor.timezone :as qp.timezone]
+    [metabase.query-processor.util :as qp.util]
     [metabase.query-processor.util.add-alias-info :as add]
     [metabase.util :as u]
     [metabase.util.date-2 :as u.date]
@@ -330,7 +331,6 @@
 
 
 ;-------------------------------------------------------------------
-
 (defmethod driver/execute-reducible-query :clickzetta
   [driver {{sql :query, :keys [params], :as inner-query} :native, :as outer-query} context respond]
   (let [database (lib.metadata/database (qp.store/metadata-provider))]
@@ -341,10 +341,13 @@
                query-tag-str (format "set query_tag='%s';" common-name)
                real-query (str query-tag-str replace_sql)]
           (log/info "Executing ClickZetta Lakehouse query" real-query)
-          (let [inner-query (-> (assoc inner-query
-                                       :query  real-query
+          (let [remark (qp.util/query->remark driver outer-query)
+                query-with-comment    (str "-- " remark "\n" sql)
+                inner-query (-> (assoc inner-query
+                                       :query  query-with-comment
                                        :max-rows (mbql.u/query->max-rows-limit outer-query)))
                 query       (assoc outer-query :native inner-query)]
+            (log/info "Indeed Executing ClickZetta Lakehouse query" query)
             ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond)))))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/DATE]
