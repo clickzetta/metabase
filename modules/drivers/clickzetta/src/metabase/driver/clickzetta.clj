@@ -8,7 +8,9 @@
     [honey.sql :as sql]
     [honey.sql.helpers :as sql.helpers]
     [java-time.api :as t]
-    [medley.core :as m]
+    [medley.core :as m]  ; unused
+    [metabase.api.common :as api :refer [*current-user*]] ; for set query_tag
+    [metabase.db.spec :as db.spec]
     [metabase.driver :as driver]
     [metabase.driver.common :as driver.common]
     [metabase.driver.sql :as driver.sql]
@@ -21,29 +23,23 @@
     [metabase.driver.sql-jdbc.sync.common :as sql-jdbc.sync.common]
     [metabase.driver.sql-jdbc.sync.describe-table
      :as sql-jdbc.describe-table]
-    [metabase.db.spec :as db.spec]
     [metabase.driver.sql.query-processor :as sql.qp]
     [metabase.driver.sql.util :as sql.u]
     [metabase.driver.sql.util.unprepare :as unprepare]
-    [metabase.driver.sync :as driver.s]
     [metabase.lib.metadata :as lib.metadata]
     [metabase.mbql.util :as mbql.u]
     [metabase.models.secret :as secret]
-    [metabase.query-processor.error-type :as qp.error-type]
     [metabase.query-processor.store :as qp.store]
     [metabase.query-processor.timezone :as qp.timezone]
     [metabase.query-processor.util :as qp.util]
-    [metabase.query-processor.util.add-alias-info :as add]
     [metabase.util :as u]
     [metabase.util.date-2 :as u.date]
     [metabase.util.honey-sql-2 :as h2x]
-    [metabase.util.i18n :refer [trs tru]]
-    [metabase.util.log :as log]
-    [metabase.api.common :as api :refer [*current-user*]]
-    [ring.util.codec :as codec])
+    [metabase.util.i18n :refer [trs]] ; trs tru -> trs
+    [metabase.util.log :as log])
   (:import
     (java.io File)
-    (java.sql Connection DatabaseMetaData ResultSet Time Types)
+    (java.sql Connection DatabaseMetaData ResultSet Time Types JDBCType PreparedStatement)
     (java.time LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime)
     (java.time.format DateTimeFormatter)
     (java.time.temporal ChronoField Temporal)))
@@ -52,33 +48,16 @@
 
 (driver/register! :clickzetta, :parent #{:sql-jdbc ::sql-jdbc.legacy/use-legacy-classes-for-read-and-set})
 
-(doseq [[feature supported?] {:datetime-diff                          true
-                              :now                                    true
-                              :convert-timezone                       true
-                              :connection-impersonation               false
-                              :connection-impersonation-requires-role false
-                              :foreign-keys                           false}]
+(doseq [[feature supported?] {:set-timezone                    true
+                              :basic-aggregations              true
+                              :standard-deviation-aggregations true
+                              :expressions                     true
+                              :native-parameters               true
+                              :expression-aggregations         true
+                              :binning                         true
+                              :foreign-keys                    false
+                              :now                             true}]
   (defmethod driver/database-supports? [:clickzetta feature] [_driver _feature _db] supported?))
-
-(defmethod driver/humanize-connection-error-message :clickzetta
-  [_ message]
-  (log/spy :error (type message))
-  (condp re-matches message
-    #"(?s).*Object does not exist.*$"
-    :database-name-incorrect
-
-    ; default - the ClickZetta Lakehouse errors have a \n in them
-    message))
-(defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :clickzetta
-  [driver database]
-  (merge
-   ((get-method sql-jdbc.conn/data-warehouse-connection-pool-properties :sql-jdbc) driver database)
-   {"testConnectionOnCheckout" false
-    "testConnectionOnCheckin" false}))
-
-(defmethod driver/db-start-of-week :clickzetta
-  [_]
-  :sunday)
 
 (defmethod sql-jdbc.sync/database-type->base-type :clickzetta
   [_ base-type]
@@ -102,106 +81,12 @@
     :BINARY                     :type/*} base-type))
 
 
-(defn- describe-schema [driver conn workspace schema]
-  (log/info "Get tables of schema : " schema)
-  (when (not-empty schema)
-    (let [sql (str "SHOW TABLES IN " schema)]
-      (log/info "Get tables by : " sql)
-      (into #{} (map (fn [{table :table_name}]
-                       {:name        table
-                        :schema      schema}))
-                     (jdbc/reducible-query {:connection conn} sql)))))
-
-
-(def ^:private excluded-schemas
-  "The set of schemas that should be excluded when querying all schemas."
-  #{"information_schema"})
-
-(defn- all-schemas [driver conn workspace]
-  (let [sql (str "SHOW SCHEMAS")]
-    (log/info "Get all schemas: " sql)
-    (into []
-          (map (fn [{:keys [schema_name]}]
-                 (when-not (contains? excluded-schemas schema_name)
-                 (describe-schema driver conn workspace schema_name))))
-          (jdbc/reducible-query {:connection conn} sql))))
-
-
-(defmethod driver/describe-database :clickzetta
-  [driver {{:keys [workspace schema] :as _details} :details :as database}]
-  (sql-jdbc.execute/do-with-connection-with-options
-   driver
-   database
-   nil
-   (fn [^Connection conn]
-     (let [schemas (if schema #{(describe-schema driver conn workspace schema)}
-                     (all-schemas driver conn workspace))]
-       (log/info "Get all schemas done: " schemas)
-       {:tables (reduce set/union #{} schemas)}))))
-
-
-(defn- valid-describe-table-row? [{:keys [column_name data_type]}]
-  (every? (every-pred (complement str/blank?)
-                      (complement #(str/starts-with? % "#")))
-          [column_name data_type]))
-
-(defn- dash-to-underscore [s]
-  (when s
-    (str/replace s #"\"" "`")))
-
-(defmethod driver/describe-table :clickzetta
-  [driver database {table-name :name, schema :schema}]
-  {:name   table-name
-   :schema schema
-   :fields
-   (sql-jdbc.execute/do-with-connection-with-options
-    driver
-    database
-    nil
-    (fn [^Connection conn]
-      (let [results (jdbc/query {:connection conn} [(format
-                                                     "describe %s.%s"
-                                                     (dash-to-underscore schema)
-                                                     (dash-to-underscore table-name))])]
-        (set
-         (for [[idx {col-name :column_name, data-type :data_type, :as result}] (m/indexed results)
-               :when (valid-describe-table-row? result)]
-           {:name              col-name
-            :database-type     (u/upper-case-en(first(str/split (first(str/split data-type #" ")) #"\(")))
-            :base-type         (sql-jdbc.sync/database-type->base-type :clickzetta (keyword (u/upper-case-en(first(str/split (first(str/split (first(str/split data-type #" ")) #"\(")) #"\<")))))
-            :database-position idx})))))})
-
-(defmethod db.spec/spec :clickzetta
-  [_ {:keys [instance service workspace]
-      :as   opts}]
-  (merge
-   {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
-    :subprotocol                   "clickzetta"
-    :subname                       (str "//" instance "." service "/" workspace "/")
-    }
-   (dissoc opts :instance :service :workspace :port)))
-
-
-(defmethod sql-jdbc.conn/connection-details->spec :clickzetta
-  [_ {:keys [user password virtualCluster schema instance service workspace additional]}]
-  (let [additional-options-base (str "user=" user "&password=" password "&virtualCluster=" virtualCluster "&schema=" schema)
-        additional-options (if (seq schema) (str additional-options-base "&schema=" schema) additional-options-base)
-        additional-options-with-additional-params (if (seq additional) (str additional-options "&" additional) additional-options)]
-    (sql-jdbc.common/handle-additional-options {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
-                                                :subprotocol                   "clickzetta"
-                                                :subname                       (str "//" instance "." service "/" workspace)
-                                                }
-                                               {:additional-options additional-options-with-additional-params})))
-
-(defmethod driver/can-connect? :clickzetta
-  [driver { :as details}]
-  true)
-
-;----------------------------------------------------------------------------
-
-;(defmethod sql.qp/honey-sql-version :clickzetta
-;  [_driver]
-;  2)
+;;;----------------------------------------------------------------------------
+;;; origin clickzetta honey sql translation
+;;;----------------------------------------------------------------------------
+(defmethod sql.qp/honey-sql-version :clickzetta
+  [_driver]
+  2)
 ;
 ;(defmethod sql.qp/current-datetime-honeysql-form :clickzetta
 ;  [_]
@@ -329,44 +214,21 @@
 ;   target-timezone
 ;   (sql.qp/->honeysql driver arg)])
 
+;;;----------------------------------------------------------------------------
+;;; presto honey sql translation
+;;;----------------------------------------------------------------------------
+(defn- date-add [unit amount expr]
+  (let [amount (if (number? amount)
+                 [:inline amount]
+                 amount)]
+    (cond-> [:date_add (h2x/literal unit) amount expr]
+      (h2x/database-type expr)
+      (h2x/with-database-type-info (h2x/database-type expr)))))
 
-;-------------------------------------------------------------------
-(defmethod driver/execute-reducible-query :clickzetta
-  [driver {{sql :query, :keys [params], :as inner-query} :native, :as outer-query} context respond]
-  (let [database (lib.metadata/database (qp.store/metadata-provider))]
-    (let [schema_select (str "`" (get-in database [:details :schema] "public") "`.")]
-      (let [replace_sql (str/replace sql schema_select "")]
-        (let [
-               common-name (:common_name @*current-user*)
-               query-tag-str (format "set query_tag='%s';" common-name)
-               remark (qp.util/query->remark driver outer-query)
-               real-query (str query-tag-str "\n-- " remark "\n" replace_sql)]
-          (let [inner-query (-> (assoc inner-query
-                                       :query  real-query
-                                       :max-rows (mbql.u/query->max-rows-limit outer-query)))
-                query       (assoc outer-query :native inner-query)]
-            ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond)))))))
+(defmethod sql.qp/add-interval-honeysql-form :clickzetta
+  [_driver expr amount unit]
+  (date-add unit amount expr))
 
-(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/DATE]
-  [_ ^ResultSet rs _rsmeta ^Integer i]
-  (fn []
-    (when-let [t (.getDate rs i)]
-      (t/zoned-date-time (t/local-date t) (t/local-time 0) (t/zone-id "UTC")))))
-
-(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP]
-  [_ ^ResultSet rs _rsmeta ^Integer i]
-  (fn []
-    (when-let [t (.getTimestamp rs i)]
-      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
-
-(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP_WITH_TIMEZONE]
-  [_ ^ResultSet rs _rsmeta ^Integer i]
-  (fn []
-    (when-let [t (.getTimestamp rs i)]
-      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
-
-
-;------------------------------------------------------------------------
 (defmethod driver/db-start-of-week :clickzetta
   [_]
   :monday)
@@ -673,3 +535,179 @@
   [driver _seconds-or-milliseconds expr]
   ;; Presto can't even represent microseconds, so convert to millis and call that version
   (sql.qp/unix-timestamp->honeysql driver :milliseconds [:/ expr [:inline 1000]]))
+
+
+;;; +----------------------------------------------------------------------------------------------------------------+
+;;; |                                                  Connectivity                                                  |
+;;; +----------------------------------------------------------------------------------------------------------------+
+(defmethod driver/humanize-connection-error-message :clickzetta
+  [_ message]
+  (log/spy :error (type message))
+  (condp re-matches message
+    #"(?s).*Object does not exist.*$"
+    :database-name-incorrect
+
+    ; default - the ClickZetta Lakehouse errors have a \n in them
+    message))
+(defmethod sql-jdbc.conn/data-warehouse-connection-pool-properties :clickzetta
+  [driver database]
+  (merge
+   ((get-method sql-jdbc.conn/data-warehouse-connection-pool-properties :sql-jdbc) driver database)
+   {"testConnectionOnCheckout" false
+    "testConnectionOnCheckin" false}))
+
+(defmethod db.spec/spec :clickzetta
+  [_ {:keys [instance service workspace]
+      :as   opts}]
+  (merge
+   {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
+    :subprotocol                   "clickzetta"
+    :subname                       (str "//" instance "." service "/" workspace "/")
+    }
+   (dissoc opts :instance :service :workspace :port)))
+
+
+(defmethod sql-jdbc.conn/connection-details->spec :clickzetta
+  [_ {:keys [user password virtualCluster schema instance service workspace additional]}]
+  (let [additional-options-base (str "user=" user "&password=" password "&virtualCluster=" virtualCluster)
+        additional-options (if (seq schema) (str additional-options-base "&schema=" schema) additional-options-base)
+        additional-options-with-additional-params (if (seq additional) (str additional-options "&" additional) additional-options)]
+    (sql-jdbc.common/handle-additional-options {:classname                     "com.clickzetta.client.jdbc.ClickZettaDriver"
+                                                :subprotocol                   "clickzetta"
+                                                :subname                       (str "//" instance "." service "/" workspace)
+                                                }
+                                               {:additional-options additional-options-with-additional-params})))
+
+; check connect always true
+(defmethod driver/can-connect? :clickzetta
+  [driver { :as details}]
+  true)
+
+;;; +----------------------------------------------------------------------------------------------------------------+
+;;; |                                                      Sync                                                      |
+;;; +----------------------------------------------------------------------------------------------------------------+
+
+(defn- describe-schema [driver conn workspace schema]
+  (log/info "Get tables of schema : " schema)
+  (when (not-empty schema)
+    (let [sql (str "SHOW TABLES IN " schema)]
+      (log/info "Get tables by : " sql)
+      (into #{} (map (fn [{table :table_name}]
+                       {:name        table
+                        :schema      schema}))
+            (jdbc/reducible-query {:connection conn} sql)))))
+
+
+(def ^:private excluded-schemas
+  "The set of schemas that should be excluded when querying all schemas."
+  #{"information_schema"})
+
+(defn- all-schemas [driver conn workspace]
+  (let [sql (str "SHOW SCHEMAS")]
+    (log/info "Get all schemas: " sql)
+    (into []
+          (map (fn [{:keys [schema_name]}]
+                 (when-not (contains? excluded-schemas schema_name)
+                   (describe-schema driver conn workspace schema_name))))
+          (jdbc/reducible-query {:connection conn} sql))))
+
+
+(defmethod driver/describe-database :clickzetta
+  [driver {{:keys [workspace schema] :as _details} :details :as database}]
+  (sql-jdbc.execute/do-with-connection-with-options
+   driver
+   database
+   nil
+   (fn [^Connection conn]
+     (let [schemas (if schema #{(describe-schema driver conn workspace schema)}
+                     (all-schemas driver conn workspace))]
+       (log/info "Get all schemas done: " schemas)
+       {:tables (reduce set/union #{} schemas)}))))
+
+
+(defn- valid-describe-table-row? [{:keys [column_name data_type]}]
+  (every? (every-pred (complement str/blank?)
+                      (complement #(str/starts-with? % "#")))
+          [column_name data_type]))
+
+(defn- dash-to-underscore [s]
+  (when s
+    (str/replace s #"\"" "`")))
+
+(defmethod driver/describe-table :clickzetta
+  [driver database {table-name :name, schema :schema}]
+  {:name   table-name
+   :schema schema
+   :fields
+   (sql-jdbc.execute/do-with-connection-with-options
+    driver
+    database
+    nil
+    (fn [^Connection conn]
+      (let [results (jdbc/query {:connection conn} [(format
+                                                     "show columns in %s.%s"
+                                                     (dash-to-underscore schema)
+                                                     (dash-to-underscore table-name))])]
+        (set
+         (for [[idx {col-name :column_name, data-type :data_type, :as result}] (m/indexed results)
+               :when (valid-describe-table-row? result)]
+           {:name              col-name
+            :database-type     (u/upper-case-en(first(str/split (first(str/split data-type #" ")) #"\(")))
+            :base-type         (sql-jdbc.sync/database-type->base-type :clickzetta (keyword (u/upper-case-en(first(str/split (first(str/split (first(str/split data-type #" ")) #"\(")) #"\<")))))
+            :database-position idx})))))})
+
+;;; +----------------------------------------------------------------------------------------------------------------+
+;;; |                                            sql-jdbc implementations                                            |
+;;; +----------------------------------------------------------------------------------------------------------------+
+; set string parameter with `'`
+; only support in cz-presto
+(defn- set-object
+  ([^PreparedStatement prepared-statement, ^Integer index, object]
+   (log/tracef "(set-object prepared-statement %d ^%s %s)" index (some-> object class .getName) (pr-str object))
+   (.setObject prepared-statement index object))
+
+  ([^PreparedStatement prepared-statement, ^Integer index, object, ^Integer target-sql-type]
+   (log/tracef "(set-object prepared-statement %d ^%s %s java.sql.Types/%s)" index (some-> object class .getName)
+               (pr-str object) (.getName (JDBCType/valueOf target-sql-type)))
+   (.setObject prepared-statement index object target-sql-type)))
+
+(defmethod sql-jdbc.execute/set-parameter [:clickzetta String]
+  [_ prepared-statement i t]
+  (let [new-t (str/replace t "'" "''")]
+    (set-object prepared-statement i new-t))
+  )
+
+; set query_tag and remark for query
+(defmethod driver/execute-reducible-query :clickzetta
+  [driver {{sql :query, :keys [params], :as inner-query} :native, :as outer-query} context respond]
+  (let [database (lib.metadata/database (qp.store/metadata-provider))]
+    (let [schema_select (str "`" (get-in database [:details :schema] "public") "`.")]
+      (let [replace_sql (str/replace sql schema_select "")]
+        (let [
+               common-name (:common_name @*current-user*)
+               query-tag-str (format "set query_tag='%s';" common-name)
+               remark (qp.util/query->remark driver outer-query)
+               real-query (str query-tag-str "\n-- " remark "\n" replace_sql)]
+          (let [inner-query (-> (assoc inner-query
+                                       :query  real-query
+                                       :max-rows (mbql.u/query->max-rows-limit outer-query)))
+                query       (assoc outer-query :native inner-query)]
+            ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond)))))))
+
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/DATE]
+  [_ ^ResultSet rs _rsmeta ^Integer i]
+  (fn []
+    (when-let [t (.getDate rs i)]
+      (t/zoned-date-time (t/local-date t) (t/local-time 0) (t/zone-id "UTC")))))
+
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP]
+  [_ ^ResultSet rs _rsmeta ^Integer i]
+  (fn []
+    (when-let [t (.getTimestamp rs i)]
+      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
+
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP_WITH_TIMEZONE]
+  [_ ^ResultSet rs _rsmeta ^Integer i]
+  (fn []
+    (when-let [t (.getTimestamp rs i)]
+      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
