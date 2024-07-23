@@ -380,6 +380,7 @@
   {:extra-paths
    ["modules/drivers/athena/test"
     "modules/drivers/bigquery-cloud-sdk/test"
+    "modules/drivers/clickzetta/test"
     "modules/drivers/druid/test"
     "modules/drivers/googleanalytics/test"
     "modules/drivers/mongo/test"
@@ -407,6 +408,7 @@
                 "modules/drivers/athena/src"
                 "modules/drivers/bigquery-cloud-sdk/src"
                 "modules/drivers/druid/src"
+                "modules/drivers/clickzetta/src"
                 "modules/drivers/googleanalytics/src"
                 "modules/drivers/mongo/src"
                 "modules/drivers/oracle/src"
@@ -428,6 +430,7 @@
                                  "enterprise/backend/src"
                                  "modules/drivers/athena/src"
                                  "modules/drivers/bigquery-cloud-sdk/src"
+                                 "modules/drivers/clickzetta/src"
                                  "modules/drivers/druid/src"
                                  "modules/drivers/googleanalytics/src"
                                  "modules/drivers/mongo/src"
