@@ -36,11 +36,15 @@
     [metabase.util.date-2 :as u.date]
     [metabase.util.honey-sql-2 :as h2x]
     [metabase.util.i18n :refer [trs]] ; trs tru -> trs
-    [metabase.util.log :as log])
+    [metabase.util.log :as log]
+    [metabase.util.malli :as mu])
   (:import
+    (com.clickzetta.client.jdbc.core CZConnection)
+    (com.clickzetta.client.jdbc.arrow.util CZTimestamp)
+    (com.mchange.v2.c3p0 C3P0ProxyConnection)
     (java.io File)
     (java.sql Connection DatabaseMetaData ResultSet Time Types JDBCType PreparedStatement)
-    (java.time LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime)
+    (java.time LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime ZoneId)
     (java.time.format DateTimeFormatter)
     (java.time.temporal ChronoField Temporal)))
 
@@ -231,7 +235,24 @@
 
 (defmethod driver/db-start-of-week :clickzetta
   [_]
-  :monday)
+  :Sunday)
+
+; lakehouse use sunday as 1, but start of week is monday, so we need to adjust it
+(mu/defn adjust-start-of-week
+  "Truncate to the day the week starts on.
+
+  `truncate-fn` is a function with the signature
+
+    (truncate-fn expr) => truncated-expr"
+  [driver      :- :keyword
+    truncate-fn :- [:=> [:cat :any] :any]
+   expr]
+  (let [offset 1]
+    (if (not= offset 0)
+      (sql.qp/add-interval-honeysql-form driver
+                                  (truncate-fn (sql.qp/add-interval-honeysql-form driver expr offset :day))
+                                  (- offset) :day)
+      (truncate-fn expr))))
 
 (defmethod sql.qp/cast-temporal-string [:clickzetta :Coercion/YYYYMMDDHHMMSSString->Temporal]
   [_ _coercion-strategy expr]
@@ -352,7 +373,7 @@
 
 (defmethod sql.qp/date [:clickzetta :week]
   [driver _ expr]
-  (sql.qp/adjust-start-of-week driver (partial date-trunc :week) expr))
+  (adjust-start-of-week driver (partial date-trunc :week) expr))
 
 (defmethod sql.qp/date [:clickzetta :month]           [_ _ expr] (date-trunc :month expr))
 (defmethod sql.qp/date [:clickzetta :month-of-year]   [_ _ expr] [:month expr])
@@ -484,7 +505,7 @@
   [_driver _unit expr]
   (letfn [(truncate [x]
                     [:date_trunc (h2x/literal :week) x])]
-    (sql.qp/adjust-start-of-week :clickzetta truncate (in-report-zone expr))))
+    (adjust-start-of-week :clickzetta truncate (in-report-zone expr))))
 
 (defmethod sql.qp/date [:clickzetta :month]
   [_driver _unit expr]
@@ -582,6 +603,40 @@
 (defmethod driver/can-connect? :clickzetta
   [driver { :as details}]
   true)
+
+(defn- pooled-conn->cz-conn
+  "Unwraps the C3P0 `pooled-conn` and returns the underlying `CZConnection` it holds."
+  ^CZConnection [^C3P0ProxyConnection pooled-conn]
+  (.unwrap pooled-conn CZConnection))
+
+(def ^:dynamic ^:private *original-connection-spec* nil)
+
+(defn- set-connection-options! [driver ^java.sql.Connection conn {:keys [^String session-timezone write?], :as _options}]
+  (let [underlying-conn (pooled-conn->cz-conn conn)]
+    (sql-jdbc.execute/set-best-transaction-level! driver conn)
+    (when-not (str/blank? session-timezone)
+      ;; set session time zone if defined
+      (.setConfig underlying-conn "cz.sql.timezone" session-timezone))
+    ;; as with statement and prepared-statement, cannot set holdability on the connection level
+    ))
+
+(defmethod sql-jdbc.execute/do-with-connection-with-options :clickzetta
+  [driver db-or-id-or-spec options f]
+  ;; ClickZetta supports setting the session timezone via a `CZConnection` instance method. Under the covers
+  (cond
+    (nil? *original-connection-spec*)
+    (binding [*original-connection-spec* db-or-id-or-spec]
+      (sql-jdbc.execute/do-with-connection-with-options driver db-or-id-or-spec options f))
+
+    :else
+    (sql-jdbc.execute/do-with-resolved-connection
+     driver
+     db-or-id-or-spec
+     (dissoc options :session-timezone)
+     (fn [^java.sql.Connection conn]
+       (when-not (sql-jdbc.execute/recursive-connection?)
+         (set-connection-options! driver conn options))
+       (f conn)))))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                      Sync                                                      |
@@ -694,20 +749,26 @@
                 query       (assoc outer-query :native inner-query)]
             ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond)))))))
 
-(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/DATE]
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP_WITH_TIMEZONE]
   [_ ^ResultSet rs _rsmeta ^Integer i]
   (fn []
-    (when-let [t (.getDate rs i)]
-      (t/zoned-date-time (t/local-date t) (t/local-time 0) (t/zone-id "UTC")))))
+    (when-let [t (.getTimestamp rs i)]
+      (let [instant (.toInstant t)
+            session-calendar (. CZTimestamp sessionCalendar)
+            zone-id-str (if session-calendar
+                          (.toString (.toZoneId (.getTimeZone session-calendar)))
+                          "UTC")
+            zone-id (ZoneId/of zone-id-str)
+            offset-date-time (OffsetDateTime/ofInstant instant zone-id)]
+        offset-date-time))))
+
 
 (defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP]
   [_ ^ResultSet rs _rsmeta ^Integer i]
   (fn []
     (when-let [t (.getTimestamp rs i)]
-      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
-
-(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP_WITH_TIMEZONE]
-  [_ ^ResultSet rs _rsmeta ^Integer i]
-  (fn []
-    (when-let [t (.getTimestamp rs i)]
-      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
+      (let [session-calendar (. CZTimestamp sessionCalendar)
+            zone-id-str (if session-calendar
+                          (.toString (.toZoneId (.getTimeZone session-calendar)))
+                          "UTC")]
+        (t/zoned-date-time (t/local-date-time t) (t/zone-id zone-id-str))))))
