@@ -23,6 +23,8 @@
     [metabase.driver.sql-jdbc.sync.common :as sql-jdbc.sync.common]
     [metabase.driver.sql-jdbc.sync.describe-table
      :as sql-jdbc.describe-table]
+    [metabase.driver.sql.parameters.substitution
+     :as sql.params.substitution]
     [metabase.driver.sql.query-processor :as sql.qp]
     [metabase.driver.sql.util :as sql.u]
     [metabase.driver.sql.util.unprepare :as unprepare]
@@ -59,30 +61,30 @@
                               :native-parameters               true
                               :expression-aggregations         true
                               :binning                         true
-                              :foreign-keys                    false
+                              :foreign-keys                    true
                               :now                             true}]
   (defmethod driver/database-supports? [:clickzetta feature] [_driver _feature _db] supported?))
 
 (defmethod sql-jdbc.sync/database-type->base-type :clickzetta
   [_ base-type]
   ({
-    :DECIMAL                    :type/Decimal
-    :INT                        :type/Integer
-    :BIGINT                     :type/BigInteger
-    :SMALLINT                   :type/Integer
-    :TINYINT                    :type/Integer
-    :FLOAT                      :type/Float
-    :DOUBLE                     :type/Float
-    :VARCHAR                    :type/Text
-    :CHAR                       :type/Text
-    :STRING                     :type/Text
-    :BOOLEAN                    :type/Boolean
-    :DATE                       :type/Date
-    :TIMESTAMP_LTZ              :type/DateTime
-    :MAP                        :type/Dictionary
-    :STRUCT                     :type/*
-    :ARRAY                      :type/Array
-    :BINARY                     :type/*} base-type))
+    :decimal                    :type/Decimal
+    :int                        :type/Integer
+    :bigint                     :type/BigInteger
+    :smallint                   :type/Integer
+    :tinyint                    :type/Integer
+    :float                      :type/Float
+    :double                     :type/Float
+    :varchar                    :type/Text
+    :char                       :type/Text
+    :string                     :type/Text
+    :boolean                    :type/Boolean
+    :date                       :type/Date
+    :timestamp_ltz              :type/DateTime
+    :map                        :type/Dictionary
+    :struct                     :type/*
+    :array                      :type/Array
+    :binary                     :type/*} base-type))
 
 
 ;;;----------------------------------------------------------------------------
@@ -235,7 +237,7 @@
 
 (defmethod driver/db-start-of-week :clickzetta
   [_]
-  :Sunday)
+  :monday)
 
 ; lakehouse use sunday as 1, but start of week is monday, so we need to adjust it
 (mu/defn adjust-start-of-week
@@ -536,14 +538,6 @@
   (let [report-zone (qp.timezone/report-timezone-id-if-supported :clickzetta (lib.metadata/database (qp.store/metadata-provider)))]
     [:from_unixtime expr (h2x/literal (or report-zone "UTC"))]))
 
-(defn- date-add [unit amount expr]
-  (let [amount (if (number? amount)
-                 [:inline amount]
-                 amount)]
-    (cond-> [:date_add (h2x/literal unit) amount expr]
-      (h2x/database-type expr)
-      (h2x/with-database-type-info (h2x/database-type expr)))))
-
 (defmethod sql.qp/unix-timestamp->honeysql [:clickzetta :milliseconds]
   [_driver _unit expr]
   ;; from_unixtime doesn't support milliseconds directly, but we can add them back in
@@ -598,45 +592,6 @@
                                                 :subname                       (str "//" instance "." service "/" workspace)
                                                 }
                                                {:additional-options additional-options-with-additional-params})))
-
-; check connect always true
-(defmethod driver/can-connect? :clickzetta
-  [driver { :as details}]
-  true)
-
-(defn- pooled-conn->cz-conn
-  "Unwraps the C3P0 `pooled-conn` and returns the underlying `CZConnection` it holds."
-  ^CZConnection [^C3P0ProxyConnection pooled-conn]
-  (.unwrap pooled-conn CZConnection))
-
-(def ^:dynamic ^:private *original-connection-spec* nil)
-
-(defn- set-connection-options! [driver ^java.sql.Connection conn {:keys [^String session-timezone write?], :as _options}]
-  (let [underlying-conn (pooled-conn->cz-conn conn)]
-    (sql-jdbc.execute/set-best-transaction-level! driver conn)
-    (when-not (str/blank? session-timezone)
-      ;; set session time zone if defined
-      (.setConfig underlying-conn "cz.sql.timezone" session-timezone))
-    ;; as with statement and prepared-statement, cannot set holdability on the connection level
-    ))
-
-(defmethod sql-jdbc.execute/do-with-connection-with-options :clickzetta
-  [driver db-or-id-or-spec options f]
-  ;; ClickZetta supports setting the session timezone via a `CZConnection` instance method. Under the covers
-  (cond
-    (nil? *original-connection-spec*)
-    (binding [*original-connection-spec* db-or-id-or-spec]
-      (sql-jdbc.execute/do-with-connection-with-options driver db-or-id-or-spec options f))
-
-    :else
-    (sql-jdbc.execute/do-with-resolved-connection
-     driver
-     db-or-id-or-spec
-     (dissoc options :session-timezone)
-     (fn [^java.sql.Connection conn]
-       (when-not (sql-jdbc.execute/recursive-connection?)
-         (set-connection-options! driver conn options))
-       (f conn)))))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                      Sync                                                      |
@@ -707,13 +662,139 @@
          (for [[idx {col-name :column_name, data-type :data_type, :as result}] (m/indexed results)
                :when (valid-describe-table-row? result)]
            {:name              col-name
-            :database-type     (u/upper-case-en(first(str/split (first(str/split data-type #" ")) #"\(")))
-            :base-type         (sql-jdbc.sync/database-type->base-type :clickzetta (keyword (u/upper-case-en(first(str/split (first(str/split (first(str/split data-type #" ")) #"\(")) #"\<")))))
+            :database-type     (first(str/split (first(str/split data-type #" ")) #"\("))
+            :base-type         (sql-jdbc.sync/database-type->base-type :clickzetta (keyword (first(str/split (first(str/split (first(str/split data-type #" ")) #"\(")) #"\<"))))
             :database-position idx})))))})
+
+;;; The Clickzetta JDBC driver DOES NOT support the `.getImportedKeys` method so just return `nil` here so the `:sql-jdbc`
+;;; implementation doesn't try to use it.
+(defmethod driver/describe-table-fks :clickzetta
+  [_driver _database _table]
+  nil)
+
+; check connect always true
+(defmethod driver/can-connect? :clickzetta
+  [driver { :as details}]
+  true)
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                            sql-jdbc implementations                                            |
 ;;; +----------------------------------------------------------------------------------------------------------------+
+
+(defmethod sql-jdbc.execute/prepared-statement :clickzetta
+  [driver ^Connection conn ^String sql params]
+  ;; with Clickzetta JDBC driver, result set holdability must be HOLD_CURSORS_OVER_COMMIT
+  ;; defining this method simply to omit setting the holdability
+  (let [stmt (.prepareStatement conn
+                                sql
+                                ResultSet/TYPE_FORWARD_ONLY
+                                ResultSet/CONCUR_READ_ONLY)]
+    (try
+      (try
+        (.setFetchDirection stmt ResultSet/FETCH_FORWARD)
+        (catch Throwable e
+          (log/debug e (trs "Error setting prepared statement fetch direction to FETCH_FORWARD"))))
+      (sql-jdbc.execute/set-parameters! driver stmt params)
+      stmt
+      (catch Throwable e
+        (.close stmt)
+        (throw e)))))
+
+(defmethod sql-jdbc.execute/statement :clickzetta
+  [_ ^Connection conn]
+  ;; and similarly for statement (do not set holdability)
+  (let [stmt (.createStatement conn
+                               ResultSet/TYPE_FORWARD_ONLY
+                               ResultSet/CONCUR_READ_ONLY)]
+    (try
+      (.setFetchDirection stmt ResultSet/FETCH_FORWARD)
+      (catch Throwable e
+        (log/debug e (trs "Error setting statement fetch direction to FETCH_FORWARD"))))
+    stmt))
+
+(defn- pooled-conn->cz-conn
+  "Unwraps the C3P0 `pooled-conn` and returns the underlying `CZConnection` it holds."
+  ^CZConnection [^C3P0ProxyConnection pooled-conn]
+  (.unwrap pooled-conn CZConnection))
+
+(def ^:dynamic ^:private *original-connection-spec* nil)
+
+(defn- set-connection-options! [driver ^java.sql.Connection conn {:keys [^String session-timezone write?], :as _options}]
+  (let [underlying-conn (pooled-conn->cz-conn conn)]
+    (sql-jdbc.execute/set-best-transaction-level! driver conn)
+    (when-not (str/blank? session-timezone)
+      ;; set session time zone if defined
+      (.setConfig underlying-conn "cz.sql.timezone" session-timezone))
+    ;; as with statement and prepared-statement, cannot set holdability on the connection level
+    ))
+
+(defmethod sql-jdbc.execute/do-with-connection-with-options :clickzetta
+  [driver db-or-id-or-spec options f]
+  ;; ClickZetta supports setting the session timezone via a `CZConnection` instance method. Under the covers
+  (cond
+    (nil? *original-connection-spec*)
+    (binding [*original-connection-spec* db-or-id-or-spec]
+      (sql-jdbc.execute/do-with-connection-with-options driver db-or-id-or-spec options f))
+
+    :else
+    (sql-jdbc.execute/do-with-resolved-connection
+     driver
+     db-or-id-or-spec
+     (dissoc options :session-timezone)
+     (fn [^java.sql.Connection conn]
+       (when-not (sql-jdbc.execute/recursive-connection?)
+         (set-connection-options! driver conn options))
+       (f conn)))))
+
+(defn- date-time->substitution [ts-str]
+  (sql.params.substitution/make-stmt-subs "from_iso8601_timestamp(?)" [ts-str]))
+
+(defmethod sql.params.substitution/->prepared-substitution [:clickzetta ZonedDateTime]
+  [_ ^ZonedDateTime t]
+  ;; for native query parameter substitution, in order to not conflict with the `PrestoConnection` session time zone
+  ;; (which was set via report time zone), it is necessary to use the `from_iso8601_timestamp` function on the string
+  ;; representation of the `ZonedDateTime` instance, but converted to the report time zone
+  #_(date-time->substitution (.format (t/offset-date-time (t/local-date-time t) (t/zone-offset 0)) DateTimeFormatter/ISO_OFFSET_DATE_TIME))
+  (let [report-zone       (qp.timezone/report-timezone-id-if-supported :clickzetta (lib.metadata/database (qp.store/metadata-provider)))
+        ^ZonedDateTime ts (if (str/blank? report-zone) t (t/with-zone-same-instant t (t/zone-id report-zone)))]
+    ;; the `from_iso8601_timestamp` only accepts timestamps with an offset (not a zone ID), so only format with offset
+    (date-time->substitution (.format ts DateTimeFormatter/ISO_OFFSET_DATE_TIME))))
+
+(defmethod sql.params.substitution/->prepared-substitution [:clickzetta LocalDateTime]
+  [_ ^LocalDateTime t]
+  ;; similar to above implementation, but for `LocalDateTime`
+  ;; when Presto parses this, it will account for session (report) time zone
+  (date-time->substitution (.format t DateTimeFormatter/ISO_LOCAL_DATE_TIME)))
+
+(defmethod sql.params.substitution/->prepared-substitution [:clickzetta OffsetDateTime]
+  [_ ^OffsetDateTime t]
+  ;; similar to above implementation, but for `ZonedDateTime`
+  ;; when Presto parses this, it will account for session (report) time zone
+  (date-time->substitution (.format t DateTimeFormatter/ISO_OFFSET_DATE_TIME)))
+
+(defn- set-time-param
+  "Converts the given instance of `java.time.temporal`, assumed to be a time (either `LocalTime` or `OffsetTime`)
+  into a `java.sql.Time`, including milliseconds, and sets the result as a parameter of the `PreparedStatement` `ps`
+  at index `i`."
+  [^PreparedStatement ps ^Integer i ^Temporal t]
+  ;; for some reason, `java-time` can't handle passing millis to java.sql.Time, so this is the most straightforward way
+  ;; I could find to do it
+  ;; reported as https://github.com/dm3/clojure.java-time/issues/74
+  (let [millis-of-day (.get t ChronoField/MILLI_OF_DAY)]
+    (.setTime ps i (Time. millis-of-day))))
+
+(defmethod sql-jdbc.execute/set-parameter [:clickzetta OffsetTime]
+  [_ ^PreparedStatement ps ^Integer i t]
+  ;; necessary because `PrestoPreparedStatement` does not implement the `setTime` overload having the final `Calendar`
+  ;; param
+  (let [adjusted-tz (t/with-offset-same-instant t (t/zone-offset 0))]
+    (set-time-param ps i adjusted-tz)))
+
+(defmethod sql-jdbc.execute/set-parameter [:clickzetta LocalTime]
+  [_ ^PreparedStatement ps ^Integer i t]
+  ;; same rationale as above
+  (set-time-param ps i t))
+
 ; set string parameter with `'`
 ; only support in cz-presto
 (defn- set-object
@@ -749,26 +830,20 @@
                 query       (assoc outer-query :native inner-query)]
             ((get-method driver/execute-reducible-query :sql-jdbc) driver query context respond)))))))
 
-(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP_WITH_TIMEZONE]
-  [_ ^ResultSet rs _rsmeta ^Integer i]
-  (fn []
-    (when-let [t (.getTimestamp rs i)]
-      (let [instant (.toInstant t)
-            session-calendar (. CZTimestamp sessionCalendar)
-            zone-id-str (if session-calendar
-                          (.toString (.toZoneId (.getTimeZone session-calendar)))
-                          "UTC")
-            zone-id (ZoneId/of zone-id-str)
-            offset-date-time (OffsetDateTime/ofInstant instant zone-id)]
-        offset-date-time))))
-
-
 (defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP]
   [_ ^ResultSet rs _rsmeta ^Integer i]
   (fn []
     (when-let [t (.getTimestamp rs i)]
-      (let [session-calendar (. CZTimestamp sessionCalendar)
-            zone-id-str (if session-calendar
-                          (.toString (.toZoneId (.getTimeZone session-calendar)))
-                          "UTC")]
-        (t/zoned-date-time (t/local-date-time t) (t/zone-id zone-id-str))))))
+      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
+
+(defmethod sql-jdbc.execute/read-column-thunk [:clickzetta Types/TIMESTAMP_WITH_TIMEZONE]
+  [_ ^ResultSet rs _rsmeta ^Integer i]
+  (fn []
+    (when-let [t (.getTimestamp rs i)]
+      (t/zoned-date-time (t/local-date-time t) (t/zone-id "UTC")))))
+
+;;; +----------------------------------------------------------------------------------------------------------------+
+;;; |                                           Other Driver Method Impls                                            |
+;;; +----------------------------------------------------------------------------------------------------------------+
+
+(prefer-method driver/database-supports? [:clickzetta :set-timezone] [:sql-jdbc :set-timezone])
