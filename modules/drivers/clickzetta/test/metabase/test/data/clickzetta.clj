@@ -70,7 +70,6 @@
          :virtualCluster                          (tx/db-test-env-var-or-throw :clickzetta :virtualCluster "default")
          :schema                                  (tx/db-test-env-var :clickzetta :schema "metabase")
          :additional                              (tx/db-test-env-var-or-throw :clickzetta :additional "transpile=127.0.0.1:8531")}]
-    (println "base-details: " base-details)
     base-details))
 
 (defmethod tx/dbdef->connection-details :clickzetta
