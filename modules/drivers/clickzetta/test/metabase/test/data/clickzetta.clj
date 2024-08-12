@@ -60,27 +60,17 @@
                              :type/TimeWithTZ             "TIME WITH TIME ZONE"}]
   (defmethod sql.tx/field-base-type->sql-type [:clickzetta base-type] [_ _] db-type))
 
-;(defn dbdef->connection-details [_database-name]
-;  (let [base-details
-;        {:instance                                (tx/db-test-env-var-or-throw :clickzetta :instance "jnsxwfyr")
-;         :service                                 (tx/db-test-env-var-or-throw :clickzetta :service "uat-api.clickzetta.com")
-;         :workspace                               (tx/db-test-env-var-or-throw :clickzetta :workspace "weiliu")
-;         :user                                    (tx/db-test-env-var-or-throw :clickzetta :user "uat_test")
-;         :password                                (tx/db-test-env-var-or-throw :clickzetta :password "Abcd123456")
-;         :virtualCluster                          (tx/db-test-env-var-or-throw :clickzetta :virtualCluster "default")
-;         :schema                                  (tx/db-test-env-var :clickzetta :schema "public")
-;         :additional                              (tx/db-test-env-var-or-throw :clickzetta :additional "fallback=127.0.0.1:8531")}]
-;    base-details))
 (defn dbdef->connection-details [_database-name]
   (let [base-details
-        {:instance                                "jnsxwfyr"
-         :service                                 "uat-api.clickzetta.com"
-         :workspace                               "weiliu"
-         :user                                    "uat_test"
-         :password                                "Abcd123456"
-         :virtualCluster                          "default"
-         :schema                                  "public"
-         :additional                              "fallback=127.0.0.1:8531"}]
+        {:instance                                (tx/db-test-env-var-or-throw :clickzetta :instance "instance")
+         :service                                 (tx/db-test-env-var-or-throw :clickzetta :service "singdata.com")
+         :workspace                               (tx/db-test-env-var-or-throw :clickzetta :workspace "example")
+         :user                                    (tx/db-test-env-var-or-throw :clickzetta :user "user")
+         :password                                (tx/db-test-env-var-or-throw :clickzetta :password "password")
+         :virtualCluster                          (tx/db-test-env-var-or-throw :clickzetta :virtualCluster "default")
+         :schema                                  (tx/db-test-env-var :clickzetta :schema "metabase")
+         :additional                              (tx/db-test-env-var-or-throw :clickzetta :additional "transpile=127.0.0.1:8531")}]
+    (println "base-details: " base-details)
     base-details))
 
 (defmethod tx/dbdef->connection-details :clickzetta
@@ -141,9 +131,9 @@
 
 (defmethod sql.tx/qualified-name-components :clickzetta
   ;; use the default schema from the in-memory connector
-  ([_ _db-name]                      [test-catalog-name "public"])
-  ([_ db-name table-name]            [test-catalog-name "public" (tx/db-qualified-table-name db-name table-name)])
-  ([_ db-name table-name field-name] [test-catalog-name "public" (tx/db-qualified-table-name db-name table-name) field-name]))
+  ([_ _db-name]                      [test-catalog-name "metabase"])
+  ([_ db-name table-name]            [test-catalog-name "metabase" (tx/db-qualified-table-name db-name table-name)])
+  ([_ db-name table-name field-name] [test-catalog-name "metabase" (tx/db-qualified-table-name db-name table-name) field-name]))
 
 (defmethod sql.tx/pk-sql-type :clickzetta
   [_]
@@ -163,7 +153,7 @@
   (testing "Make sure logic to strip out NOT NULL and PRIMARY KEY stuff works as expected"
            (let [db-def    (tx/get-dataset-definition defs/test-data)
                  table-def (-> db-def :table-definitions second)]
-             (is (= "CREATE TABLE \"weiliu\".\"public\".\"test_data_categories\" (\"id\" INTEGER, \"name\" VARCHAR) ;"
+             (is (= "CREATE TABLE \"weiliu\".\"metabase\".\"test_data_categories\" (\"id\" INTEGER, \"name\" VARCHAR) ;"
                     (sql.tx/create-table-sql :clickzetta db-def table-def))))))
 
 (defmethod ddl.i/format-name :clickzetta

@@ -31,10 +31,10 @@
 
 (deftest describe-database-test
   (mt/test-driver :clickzetta
-                  (is (= {:tables #{{:name "test_data_categories" :schema "public"}
-                                    {:name "test_data_checkins" :schema "public"}
-                                    {:name "test_data_users" :schema "public"}
-                                    {:name "test_data_venues" :schema "public"}}}
+                  (is (= {:tables #{{:name "test_data_categories" :schema "metabase"}
+                                    {:name "test_data_checkins" :schema "metabase"}
+                                    {:name "test_data_users" :schema "metabase"}
+                                    {:name "test_data_venues" :schema "metabase"}}}
                          (-> (driver/describe-database :clickzetta (mt/db))
                              (update :tables (comp set (partial filter (comp #{"test_data_categories"
                                                                                "test_data_venues"
@@ -45,31 +45,31 @@
 (deftest describe-table-test
   (mt/test-driver :clickzetta
                   (is (= {:name   "test_data_venues"
-                          :schema "default"
+                          :schema "metabase"
                           :fields #{{:name          "name",
                                      ;; for HTTP based Presto driver, this is coming back as varchar(255)
                                      ;; however, for whatever reason, the DESCRIBE statement results do not return the length
-                                     :database-type "STRING"
+                                     :database-type "string"
                                      :base-type     :type/Text
                                      :database-position 1}
                                     {:name          "latitude"
-                                     :database-type "DOUBLE"
+                                     :database-type "double"
                                      :base-type     :type/Float
                                      :database-position 3}
                                     {:name          "longitude"
-                                     :database-type "DOUBLE"
+                                     :database-type "double"
                                      :base-type     :type/Float
                                      :database-position 4}
                                     {:name          "price"
-                                     :database-type "INT"
+                                     :database-type "int"
                                      :base-type     :type/Integer
                                      :database-position 5}
                                     {:name          "category_id"
-                                     :database-type "INT"
+                                     :database-type "int"
                                      :base-type     :type/Integer
                                      :database-position 2}
                                     {:name          "id"
-                                     :database-type "INT"
+                                     :database-type "int"
                                      :base-type     :type/Integer
                                      :database-position 0}}}
                          (driver/describe-table :clickzetta (mt/db) (t2/select-one 'Table :id (mt/id :venues)))))))
@@ -91,9 +91,9 @@
 (deftest ^:parallel page-test
   (testing ":page clause"
            (let [honeysql (sql.qp/apply-top-level-clause :clickzetta :page
-                                                         {:select   [[:public.categories.name :name] [:public.categories.id :id]]
-                                                          :from     [:public.categories]
-                                                          :order-by [[:public.categories.id :asc]]}
+                                                         {:select   [[:metabase.categories.name :name] [:metabase.categories.id :id]]
+                                                          :from     [:metabase.categories]
+                                                          :order-by [[:metabase.categories.id :asc]]}
                                                          {:page {:page  2
                                                                  :items 5}})]
              (is (= [["SELECT"
@@ -102,16 +102,16 @@
                       "FROM"
                       "  ("
                       "    SELECT"
-                      "      \"public\".\"categories\".\"name\" AS \"name\","
-                      "      \"public\".\"categories\".\"id\" AS \"id\","
+                      "      \"metabase\".\"categories\".\"name\" AS \"name\","
+                      "      \"metabase\".\"categories\".\"id\" AS \"id\","
                       "      row_number() OVER ("
                       "        ORDER BY"
-                      "          \"public\".\"categories\".\"id\" ASC"
+                      "          \"metabase\".\"categories\".\"id\" ASC"
                       "      ) AS \"__rownum__\""
                       "    FROM"
-                      "      \"public\".\"categories\""
+                      "      \"metabase\".\"categories\""
                       "    ORDER BY"
-                      "      \"public\".\"categories\".\"id\" ASC"
+                      "      \"metabase\".\"categories\".\"id\" ASC"
                       "  )"
                       "WHERE"
                       "  \"__rownum__\" > 5"
@@ -154,8 +154,8 @@
                                               :filter      [:= $name "wow"]})]
                     (testing "The native query returned in query results should use user-friendly splicing"
                              (is (= (str "SELECT COUNT(*) AS \"count\" "
-                                         "FROM \"public\".\"test_data_venues\" "
-                                         "WHERE \"public\".\"test_data_venues\".\"name\" = 'wow'")
+                                         "FROM \"metabase\".\"test_data_venues\" "
+                                         "WHERE \"metabase\".\"test_data_venues\".\"name\" = 'wow'")
                                     (:query (qp.compile/compile-and-splice-parameters query))
                                     (-> (qp/process-query query) :data :native_form :query)))))))
 
