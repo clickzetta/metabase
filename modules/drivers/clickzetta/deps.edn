@@ -2,4 +2,4 @@
  ["src" "resources"]
 
  :deps
- {com.clickzetta/clickzetta-java {:mvn/version "1.4.15"}}}
+ {com.clickzetta/clickzetta-java {:mvn/version "1.4.16"}}}
