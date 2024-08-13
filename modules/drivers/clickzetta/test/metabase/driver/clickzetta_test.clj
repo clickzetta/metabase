@@ -122,7 +122,7 @@
 
 (deftest ^:parallel db-default-timezone-test
   (mt/test-driver :clickzetta
-                  (is (= "UTC"
+                  (is (= "Asia/Shanghai"
                          (driver/db-default-timezone :clickzetta (mt/db))))))
 
 (deftest template-tag-timezone-test

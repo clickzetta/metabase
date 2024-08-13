@@ -67,7 +67,7 @@
          :workspace                               (tx/db-test-env-var-or-throw :clickzetta :workspace "example")
          :user                                    (tx/db-test-env-var-or-throw :clickzetta :user "user")
          :password                                (tx/db-test-env-var-or-throw :clickzetta :password "password")
-         :virtualCluster                          (tx/db-test-env-var-or-throw :clickzetta :virtualCluster "default")
+         :virtualCluster                          (tx/db-test-env-var-or-throw :clickzetta :virtualcluster "default")
          :schema                                  (tx/db-test-env-var :clickzetta :schema "metabase")
          :additional                              (tx/db-test-env-var-or-throw :clickzetta :additional "transpile=127.0.0.1:8531")}]
     base-details))
